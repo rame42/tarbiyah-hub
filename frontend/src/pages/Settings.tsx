@@ -54,6 +54,7 @@ export default function Settings() {
             )}
           </Async>
         </Card>
+        <Updates />
         <Backups />
       </div>
     </div>
@@ -202,6 +203,43 @@ function Backups() {
           <ul className="plain-list">{rows.map((b) => <li key={b.name}><code dir="ltr">{b.name}</code> — {b.size_mb} MB</li>)}</ul>
         )}
       </Async>
+    </Card>
+  );
+}
+
+interface UpdateInfo {
+  configured: boolean;
+  message?: string;
+  error?: string;
+  update_available?: boolean;
+  current?: { sha?: string; installed_at?: string; source?: string };
+  latest?: { sha: string; date: string | null; message: string };
+}
+
+function Updates() {
+  const { t } = useI18n();
+  const state = useAsync(() => api.get<UpdateInfo>("/api/update"), []);
+  const u = state.data;
+  return (
+    <Card title={t("updates")}>
+      <ErrorBox error={state.error} />
+      {u ? (
+        <div className="form-stack small">
+          {u.current?.sha ? <p>{t("installed_version")}: <code>{u.current.sha}</code> {u.current.installed_at ? `(${u.current.installed_at})` : null}</p> : null}
+          {!u.configured ? <p className="muted" dir="auto">{t("updates_not_configured")}</p> : null}
+          {u.error ? <p className="muted">{u.error}</p> : null}
+          {u.configured && u.latest ? (
+            u.update_available ? (
+              <div className="alert alert-ok" role="status">
+                <strong>{t("update_available")}</strong> <code>{u.latest.sha}</code> — <span dir="auto">{u.latest.message}</span>
+                <p>{t("update_how")}</p>
+              </div>
+            ) : <p>{t("up_to_date")}</p>
+          ) : null}
+          <p className="muted">{t("update_keeps")}</p>
+          <div><button type="button" className="btn btn-small" onClick={() => state.reload()}>{t("check_updates")}</button></div>
+        </div>
+      ) : null}
     </Card>
   );
 }

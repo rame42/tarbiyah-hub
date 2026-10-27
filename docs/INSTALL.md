@@ -42,6 +42,19 @@ recent ones are skipped, and resources already in the library are never duplicat
 **`stop` vs closing the window.** `stop` lets running jobs finish first. Closing the window is
 also safe: the interrupted job is simply resumed later.
 
+## 3b. Updating to a new version (no reinstall)
+
+Updates replace **program files only**. `data\`, `.env`, `.venv\` and `backups\` are never touched, so your
+library, sources, questions, settings and keys stay exactly as they are.
+
+- **From a zip file:** drag the new `tarbiyah-hub.zip` **onto `update.bat`**. It stops the system,
+  updates, and starts again by itself.
+- **Automatically from GitHub:** put `TH_UPDATE_REPO=owner/repository` (and `TH_UPDATE_TOKEN=` for a private
+  repository) in `.env`. Settings > Updates then shows when a new version is ready, and double-clicking
+  `update.bat` installs it.
+
+Never delete the folder and extract a new copy: that would delete `data\` too.
+
 ## 4. Run automatically
 
 **Windows (at login, restarts if it crashes):** right-click `scripts\install-autostart-windows.ps1` >

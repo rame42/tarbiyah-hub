@@ -12,6 +12,7 @@
   cycle                     queue one research cycle now
   drain [--seconds N]       process queued jobs in the foreground until the queue is empty
   report [--day YYYY-MM-DD] build (or rebuild) a daily report
+  update [--zip FILE]       update the program in place (keeps data/, .env, settings)
   backup [--dest DIR]       consistent backup of the database and files
   restore ARCHIVE           restore a backup archive (stop web/worker first)
 """
@@ -63,11 +64,26 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--day")
     bk = sub.add_parser("backup")
     bk.add_argument("--dest")
+    up = sub.add_parser("update")
+    up.add_argument("--zip")
+    up.add_argument("--check", action="store_true")
     rs = sub.add_parser("restore")
     rs.add_argument("archive")
     args = ap.parse_args(argv)
 
     _setup_logging()
+    if args.cmd == "update":  # replaces program files only; runs before the app is loaded
+        from .updater import check, update
+
+        if args.check:
+            print(json.dumps(check(), indent=2))
+            return 0
+        try:
+            update(args.zip)
+        except Exception as e:  # noqa: BLE001 - show a plain message to the user
+            print(f"Update failed: {e}")
+            return 1
+        return 0
     if args.cmd == "restore":  # must run before the database is opened
         from .backup import restore
 

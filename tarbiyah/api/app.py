@@ -826,6 +826,13 @@ def download_output(oid: int, fmt: str = "md", s: Session = Depends(get_session)
     return FileResponse(files[fmt], filename=Path(files[fmt]).name)
 
 
+@app.get("/api/update")
+def update_status() -> dict[str, Any]:
+    from ..updater import check
+
+    return check()
+
+
 @app.post("/api/backup")
 def make_backup() -> dict[str, Any]:
     from ..backup import backup
