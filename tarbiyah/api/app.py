@@ -598,6 +598,9 @@ def create_source(body: SourceIn, s: Session = Depends(get_session)) -> dict[str
     if s.execute(select(Source).where(Source.key == key)).first():
         raise HTTPException(409, f"Source key '{key}' already exists")
     cfg = {**a.info.default_config, **body.config, "role": "monitor"}
+    problems = a.config_problems(cfg)
+    if problems:
+        raise HTTPException(400, "Settings incomplete: " + " | ".join(problems))
     src = Source(key=key, adapter=body.adapter, name=body.name, enabled=body.enabled, config=cfg,
                  schedule_minutes=body.schedule_minutes or a.info.default_schedule_minutes,
                  health="ready" if a.is_configured() else "needs_credentials")
@@ -615,7 +618,13 @@ def update_source(sid: int, body: dict[str, Any], s: Session = Depends(get_sessi
         if k in body:
             setattr(src, k, body[k])
     if "config" in body:
-        src.config = {**(src.config or {}), **body["config"], "role": (src.config or {}).get("role", "monitor")}
+        new_cfg = {**(src.config or {}), **body["config"], "role": (src.config or {}).get("role", "monitor")}
+        a = ADAPTERS.get(src.adapter)
+        if a is not None and new_cfg.get("role") == "monitor":
+            problems = a.config_problems(new_cfg)
+            if problems:
+                raise HTTPException(400, "Settings incomplete: " + " | ".join(problems))
+        src.config = new_cfg
     if "paused" in body:
         paused = set(get_all(s).get("paused_collectors") or [])
         (paused.add if body["paused"] else paused.discard)(src.key)

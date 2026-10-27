@@ -41,6 +41,11 @@ def test_api_end_to_end(env, fixtures_dir, monkeypatch):
         src = c.post("/api/sources", json={"adapter": "rss", "name": "Blog", "config": {"feeds": ["https://example.org/feed"]}}).json()
         assert src["role"] == "monitor" and src["enabled"]
         assert c.post("/api/sources", json={"adapter": "openalex", "name": "x"}).status_code == 400
+        r = c.post("/api/sources", json={"adapter": "web_crawler", "name": "No URL", "config": {}})
+        assert r.status_code == 400 and "start_urls" in r.json()["detail"]  # incomplete settings refused
+        r = c.post("/api/sources", json={"adapter": "apify", "name": "No actor", "config": {"input": {}}})
+        assert r.status_code == 400 and "actor" in r.json()["detail"]
+        assert c.patch(f"/api/sources/{src['id']}", json={"config": {"feeds": []}}).status_code == 400
         assert c.patch(f"/api/sources/{src['id']}", json={"paused": True}).json()["paused"]
         # secrets never leave the server
         for path in ("/api/status", "/api/settings", "/api/sources", "/api/adapters", "/api/dashboard"):

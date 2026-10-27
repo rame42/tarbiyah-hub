@@ -38,6 +38,8 @@ class AdapterInfo:
     default_config: dict[str, Any] = field(default_factory=dict)
     default_enabled: bool = False
     seed_search_source: bool = True  # False: searches run only through configured sources (e.g. Apify)
+    # config keys that must be non-empty; a tuple inside means "at least one of these"
+    required_config: tuple[str | tuple[str, ...], ...] = ()
 
 
 @dataclass
@@ -85,6 +87,17 @@ class SourceAdapter:
     def collect(self, ctx: CollectContext) -> Iterator[ResourceIn]:
         raise NotImplementedError
         yield  # pragma: no cover
+
+    def config_problems(self, cfg: dict[str, Any]) -> list[str]:
+        """Human-readable list of missing required settings (empty when the config is usable)."""
+        problems = []
+        for req in self.info.required_config:
+            keys = req if isinstance(req, tuple) else (req,)
+            if not any(cfg.get(k) for k in keys):
+                hint = " or ".join(f'"{k}"' for k in keys)
+                help_text = "; ".join(self.info.config_fields.get(k, "") for k in keys if self.info.config_fields.get(k))
+                problems.append(f"{self.info.label}: {hint} is required" + (f" ({help_text})" if help_text else ""))
+        return problems
 
     def supports(self, capability: str) -> bool:
         return capability in self.info.capabilities

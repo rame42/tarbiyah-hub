@@ -90,7 +90,7 @@ class WebCrawlerAdapter(SourceAdapter):
         resource_types=("article", "web_page", "institution_page", "course", "book", "paper"),
         access_notes="Obeys robots.txt and per-site rate limits. Documents are stored only when the site "
                      "declares an open licence or you set download_documents=true for a site you have permission for.",
-        default_schedule_minutes=1440, min_interval_seconds=2.0,
+        default_schedule_minutes=1440, min_interval_seconds=2.0, required_config=("start_urls",),
         config_fields={
             "start_urls": "List of starting URLs", "allowed_domains": "Domains to stay within",
             "include_patterns": "Regex list of URLs to follow", "exclude_patterns": "Regex list of URLs to skip",
@@ -189,7 +189,9 @@ class WebCrawlerAdapter(SourceAdapter):
     def collect(self, ctx: CollectContext) -> Iterator[ResourceIn]:
         cfg = {**self.info.default_config, **(ctx.source_config or {})}
         if not cfg.get("start_urls"):
-            raise ValueError("Website source has no start_urls configured.")
+            raise ValueError('This Website crawler source has no website address. Edit it on the Sources page and set '
+                             '"start_urls", e.g. {"start_urls": ["https://example.org/articles"]}. If you meant to '
+                             'add an Apify scraper, delete this source and add a new one with type "Apify Actor".')
         domains = cfg.get("allowed_domains") or sorted({_domain(u) for u in cfg["start_urls"]})
         max_pages = int(cfg.get("max_pages") or get_setting("crawler_default_max_pages"))
         max_depth = int(cfg.get("max_depth") or get_setting("crawler_default_max_depth"))

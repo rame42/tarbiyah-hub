@@ -89,6 +89,7 @@ class TelegramAdapter(SourceAdapter):
         optional_credentials=("TELEGRAM_API_ID", "TELEGRAM_API_HASH"),
         access_notes="Only channels with a public web preview. Private groups/chats are never accessed. "
                      "Files shared in channels are listed by title; they are not downloaded.",
+        required_config=("channels",),
         default_schedule_minutes=360, min_interval_seconds=3.0,
         config_fields={"channels": "List of public channel usernames (without @)", "max_pages": "Pages of history per run"},
         default_config={"channels": [], "max_pages": 5},
@@ -143,6 +144,7 @@ class RedditAdapter(SourceAdapter):
         access_notes="Free 'script' app at https://www.reddit.com/prefs/apps (non-commercial use). Posts only; "
                      "usernames are kept as public attribution, comments are not collected.",
         languages=("en", "ar"), default_schedule_minutes=720, min_interval_seconds=2.0,
+        required_config=("subreddits", "queries"),
         config_fields={"subreddits": "List of subreddit names", "queries": "Search queries within them"},
         default_config={"subreddits": ["islam", "MuslimLounge", "Parenting"], "queries": ["tarbiyah", "islamic parenting"]},
     )
@@ -201,6 +203,7 @@ class FacebookAdapter(SourceAdapter):
         access_notes="Requires a Page access token for pages you manage, or a Meta app approved for "
                      "'Page Public Content Access'. Scraping facebook.com is not permitted and not implemented.",
         default_schedule_minutes=720, min_interval_seconds=2.0,
+        required_config=("page_ids",),
         config_fields={"page_ids": "List of Page IDs or usernames"}, default_config={"page_ids": []},
     )
 
@@ -236,6 +239,7 @@ class InstagramAdapter(SourceAdapter):
         access_notes="Requires an Instagram professional account connected to a Meta app. Personal accounts and "
                      "private profiles cannot be collected.",
         default_schedule_minutes=720, min_interval_seconds=2.0,
+        required_config=("usernames",),
         config_fields={"usernames": "Business/creator usernames to read via business discovery"},
         default_config={"usernames": []},
     )
@@ -266,6 +270,7 @@ class XAdapter(SourceAdapter):
         credentials=("X_BEARER_TOKEN",), paid=True,
         access_notes="X API read access requires a paid tier. Disabled until a bearer token is configured.",
         default_schedule_minutes=1440, min_interval_seconds=3.0,
+        required_config=(("queries", "usernames"),),
         config_fields={"queries": "Search queries", "usernames": "Accounts to follow"},
         default_config={"queries": [], "usernames": []},
     )
@@ -320,6 +325,7 @@ class TikTokAdapter(SourceAdapter):
         access_notes="oEmbed gives title and author only. The Research API is limited to approved researchers; "
                      "transcripts are available only through it.",
         default_schedule_minutes=1440, min_interval_seconds=2.0,
+        required_config=("video_urls",),
         config_fields={"video_urls": "List of TikTok video URLs to catalogue"}, default_config={"video_urls": []},
     )
 

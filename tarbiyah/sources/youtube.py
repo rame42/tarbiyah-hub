@@ -63,7 +63,7 @@ class YouTubeAdapter(SourceAdapter):
         optional_credentials=("YOUTUBE_API_KEY",),
         access_notes="Channel monitoring works without credentials. Search needs a free YouTube Data API key. "
                      "Video files are never downloaded; only metadata and available captions.",
-        default_schedule_minutes=720, min_interval_seconds=1.0,
+        default_schedule_minutes=720, min_interval_seconds=1.0, required_config=(("channel_ids", "playlist_ids"),),
         config_fields={"channel_ids": "List of channel IDs (UC...)", "playlist_ids": "List of playlist IDs",
                        "transcripts": "Collect captions (true/false)", "language": "Language hint"},
         default_config={"channel_ids": [], "playlist_ids": [], "transcripts": True},

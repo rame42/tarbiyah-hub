@@ -93,7 +93,7 @@ class RssAdapter(SourceAdapter):
         capabilities=("monitor",), resource_types=("article", "podcast_episode", "video"),
         access_notes="Feeds are published for syndication. Podcast audio is not downloaded; published "
                      "transcripts (<podcast:transcript>) are collected when available.",
-        default_schedule_minutes=360, min_interval_seconds=2.0,
+        default_schedule_minutes=360, min_interval_seconds=2.0, required_config=(("feeds", "url"),),
         config_fields={"feeds": "List of feed URLs", "fetch_full_text": "Read the full article page (true/false)",
                        "resource_type": "Type for items (article / podcast_episode)", "language": "Language hint"},
         default_config={"feeds": [], "fetch_full_text": True},

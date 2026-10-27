@@ -166,6 +166,7 @@ class ApifyAdapter(SourceAdapter):
         access_notes="Apify bills your account per run (free plan includes monthly credit). Runs are capped by "
                      "the Apify limits in Settings. Collect public content only and follow each platform's terms.",
         default_schedule_minutes=1440, min_interval_seconds=1.0, seed_search_source=False,
+        required_config=("actor",),
         config_fields={
             "actor": "Actor ID, e.g. clockworks/tiktok-scraper (from the Actor's page)",
             "input": "Actor input JSON (copy from the Actor's Input tab > JSON)",
