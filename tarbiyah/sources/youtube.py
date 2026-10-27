@@ -98,7 +98,8 @@ class YouTubeAdapter(SourceAdapter):
         if not key:
             from .base import NotConfigured
 
-            raise NotConfigured("YouTube search needs YOUTUBE_API_KEY (free, Google Cloud console).")
+            raise NotConfigured("YouTube search (used by the research agent) needs a free YOUTUBE_API_KEY in .env. "
+                                "Channels you add by channel ID work without it; untick Enabled here if you do not need search.")
         params: dict[str, Any] = {"part": "snippet", "q": query, "type": "video", "maxResults": min(limit, 25), "key": key}
         if lang in ("ar", "en"):
             params["relevanceLanguage"] = lang

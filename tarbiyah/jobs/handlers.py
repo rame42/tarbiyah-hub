@@ -156,7 +156,7 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
             items = adapter.search(p["query"], p.get("lang"), int(p.get("limit", 15)))
     except NotConfigured as e:
         log_row.status, log_row.error = "not_configured", str(e)
-        src.health = "needs_credentials"
+        src.health, src.last_error = "needs_credentials", str(e)  # shown on the Sources card
         return {"skipped": str(e)}
     except Exception as e:
         log_row.status, log_row.error = "error", f"{type(e).__name__}: {e}"[:2000]
