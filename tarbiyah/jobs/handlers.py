@@ -212,7 +212,7 @@ def process_job(ctx: JobContext) -> dict[str, Any]:
     r = ctx.session.get(Resource, ctx.payload["resource_id"])
     if r is None:
         raise PermanentFailure("resource deleted")
-    ocr = claude_ocr if claude().available() else None
+    ocr = claude_ocr if claude().available() and getattr(claude(), "name", "claude") == "claude" else None
     status = process(ctx.session, r, ocr)
     if status in ("extracted", "low_quality", "metadata_only", "needs_ocr") and r.chunks:
         if claude().available():

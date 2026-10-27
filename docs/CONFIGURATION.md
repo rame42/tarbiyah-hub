@@ -50,6 +50,35 @@ word-for-word against the stored source passage. Unverified quotes are discarded
 without verified evidence are downgraded to "insufficient". AI text is always labelled with the
 model that produced it.
 
+## Using another AI service instead of Claude
+
+Any service with an OpenAI-style "chat completions" API works. Put these lines in `.env` and restart:
+
+```
+TH_AI_PROVIDER=openai_compatible
+TH_AI_BASE_URL=<address from the table>
+TH_AI_API_KEY=<your key from that service>
+TH_AI_MODEL=<exact model name, copied from the service's model list>
+TH_AI_PRICE_INPUT=<USD per million input tokens>     (for the daily budget)
+TH_AI_PRICE_OUTPUT=<USD per million output tokens>
+```
+
+| Service | TH_AI_BASE_URL | Key from |
+|---|---|---|
+| OpenAI (ChatGPT models) | `https://api.openai.com/v1` | platform.openai.com > API keys |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | aistudio.google.com > Get API key |
+| DeepSeek | `https://api.deepseek.com` | platform.deepseek.com |
+| Mistral | `https://api.mistral.ai/v1` | console.mistral.ai |
+| Groq | `https://api.groq.com/openai/v1` | console.groq.com |
+| OpenRouter (many models, one key) | `https://openrouter.ai/api/v1` | openrouter.ai/keys |
+
+Everything AI-related then uses that service: knowledge extraction, questions, synthesis, QA, assistant and
+outputs, with the same daily limits and the same word-for-word quote checking. Differences: scanned-page OCR
+stays Claude-only (use Tesseract), and quality depends on the model; smaller models make more mistakes in
+Arabic and in following the required answer format (failed AI jobs are shown on the Jobs page). Set the two
+price lines so the daily budget is accurate; without them spend is estimated at a conservative rate.
+To return to Claude, set `TH_AI_PROVIDER=claude` (or remove the line).
+
 ## Semantic search (optional): Voyage AI
 
 `VOYAGE_API_KEY=` (from https://www.voyageai.com, which has a free tier). This enables multilingual embeddings. They are

@@ -67,6 +67,8 @@ class Usage:
 
 
 class ClaudeProvider:
+    name = "claude"
+
     def __init__(self) -> None:
         self._client = None
         self._lock = threading.Lock()
@@ -84,6 +86,7 @@ class ClaudeProvider:
             from ..settings import get_usage
 
             return {
+                "provider": getattr(self, "name", "claude"),
                 "configured": self.configured(),
                 "enabled": bool(get_setting("ai_enabled", s)),
                 "model": self.model_for("default"),
@@ -121,7 +124,11 @@ class ClaudeProvider:
         it = int(getattr(usage, "input_tokens", 0) or 0) + int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
         cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
         ot = int(getattr(usage, "output_tokens", 0) or 0)
-        pin, pout = PRICES.get(model, (4.0, 20.0))
+        cfg = get_config()
+        if cfg.ai_price_input or cfg.ai_price_output:
+            pin, pout = cfg.ai_price_input, cfg.ai_price_output
+        else:
+            pin, pout = PRICES.get(model, (4.0, 20.0))  # unknown models: counted at a conservative rate
         cost = (it * pin + cr * pin * 0.1 + ot * pout) / 1_000_000
         record_usage("ai_calls")
         record_usage("ai_cost_usd", cost)
@@ -216,7 +223,12 @@ _provider: ClaudeProvider | None = None
 def claude() -> ClaudeProvider:
     global _provider
     if _provider is None:
-        _provider = ClaudeProvider()
+        if get_config().ai_provider.strip().lower() in ("openai_compatible", "openai", "other"):
+            from .openai_compat import OpenAICompatProvider
+
+            _provider = OpenAICompatProvider()
+        else:
+            _provider = ClaudeProvider()
     return _provider
 
 

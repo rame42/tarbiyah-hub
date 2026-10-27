@@ -46,7 +46,7 @@ def system_status(session: Session) -> dict[str, Any]:
         "ai": claude().status(),
         "ocr": {"tesseract": tess, "languages": tesseract_languages(cfg.tesseract_cmd) if tess else [],
                 "provider_setting": settings["ocr_provider"],
-                "claude_ocr_available": claude().available()},
+                "claude_ocr_available": claude().available() and claude().name == "claude"},
         "jobs": jobs,
         "counts": {
             "resources": session.execute(select(func.count()).select_from(Resource).where(Resource.duplicate_of_id.is_(None))).scalar(),
@@ -66,5 +66,5 @@ def system_status(session: Session) -> dict[str, Any]:
         "credentials": {k: bool(getattr(cfg, k)) for k in
                         ("anthropic_api_key", "voyage_api_key", "youtube_api_key", "core_api_key", "reddit_client_id",
                          "facebook_access_token", "instagram_access_token", "x_bearer_token", "tiktok_client_key",
-                         "apify_token")},
+                         "apify_token", "ai_api_key")},
     }

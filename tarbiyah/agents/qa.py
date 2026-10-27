@@ -65,7 +65,7 @@ def review_findings(session: Session, limit: int = 15) -> int:
 def reprocess_flagged(session: Session, limit: int = 20) -> int:
     """Send scanned/low-quality documents back for processing when OCR became available."""
     ocr_ready = tesseract_available(get_config().tesseract_cmd) or (
-        claude().available() and get_setting("ocr_provider", session) in ("auto", "claude"))
+        claude().available() and claude().name == "claude" and get_setting("ocr_provider", session) in ("auto", "claude"))
     if not ocr_ready:
         return 0
     n = 0

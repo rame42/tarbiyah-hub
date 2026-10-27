@@ -29,6 +29,12 @@ class Config(BaseSettings):
     # Claude
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     ai_model: str = Field(default="claude-opus-5-5", alias="TH_AI_MODEL")
+    # Other AI services (OpenAI-style chat completions API): TH_AI_PROVIDER=openai_compatible
+    ai_provider: str = Field(default="claude", alias="TH_AI_PROVIDER")
+    ai_base_url: str = Field(default="", alias="TH_AI_BASE_URL")
+    ai_api_key: str = Field(default="", alias="TH_AI_API_KEY")
+    ai_price_input: float = Field(default=0.0, alias="TH_AI_PRICE_INPUT")    # USD per million tokens
+    ai_price_output: float = Field(default=0.0, alias="TH_AI_PRICE_OUTPUT")
 
     # Optional providers / collectors
     voyage_api_key: str = Field(default="", alias="VOYAGE_API_KEY")
