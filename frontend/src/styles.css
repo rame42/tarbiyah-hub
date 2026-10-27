@@ -1188,3 +1188,20 @@ q.quote {
   white-space: nowrap;
 }
 .btn-watch:hover { background: #a82722; border-color: #a82722; color: #fff; }
+
+.badge-label { background: var(--accent-soft, #e7f0ec); color: var(--accent, #1d6b55); border: 1px dashed currentColor; }
+.bulk-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-block-end: 12px;
+  border: 1px solid var(--border, #d9e3de); border-radius: 10px; background: var(--surface-2, #f6f8f6); }
+.bulk-bar select, .bulk-bar input[type=text] { min-width: 0; max-width: 100%; }
+.res-select { display: flex; gap: 10px; align-items: flex-start; }
+.res-select > input { margin-block-start: 6px; flex: none; }
+.res-select > div { min-width: 0; flex: 1; }
+.btn-danger { background: #b42318; border-color: #b42318; color: #fff; }
+.btn-danger:hover { background: #912018; color: #fff; }
+.form-grid label { display: flex; flex-direction: column; gap: 0.25rem; }
+.form-grid textarea { inline-size: 100%; font: inherit; }
+.form-grid input[type="checkbox"] { inline-size: auto; }
+.check-row { display: flex; flex-wrap: wrap; gap: 0.6rem; border: 0; padding: 0; margin: 0; }
+.check-row .check { flex-direction: row; }
+.text-error { color: var(--danger); }
+.form-grid label.check { flex-direction: row; align-items: center; align-self: end; }

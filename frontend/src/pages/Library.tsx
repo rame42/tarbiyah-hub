@@ -22,7 +22,7 @@ interface SearchResponse {
 export const ACCESS_VALUES = ["open_access", "open_license", "public_domain", "user_provided", "paid", "lending_only", "restricted", "unknown"];
 export const PROCESSING_VALUES = ["pending", "metadata_only", "downloaded", "text_collected", "extracted", "needs_ocr", "low_quality", "failed", "skipped_limit"];
 export const RESOURCE_TYPES = ["book", "article", "paper", "thesis", "report", "document", "video", "podcast_episode", "social_post", "other"];
-const FILTER_KEYS = ["language", "pillar", "type", "access", "source", "topic", "date_from", "date_to", "status"] as const;
+const FILTER_KEYS = ["language", "pillar", "type", "access", "source", "topic", "date_from", "date_to", "status", "label", "show_deleted"] as const;
 const PAGE_SIZE = 20;
 
 export default function Library() {
@@ -35,6 +35,8 @@ export default function Library() {
   useEffect(() => setDraft(q), [q]);
 
   const meta = useAsync<Meta>(() => getMeta(), []);
+  const labelList = useAsync(() => api.get<{ label: string; count: number }[]>("/api/labels"), []);
+  const [selected, setSelected] = useState<number[]>([]);
   const filters: Record<string, string> = {};
   FILTER_KEYS.forEach((k) => {
     const val = sp.get(k);
@@ -45,6 +47,9 @@ export default function Library() {
     () => api.get<SearchResponse>(`/api/resources${qs({ q, ...filters, page, page_size: PAGE_SIZE, cross_language: crossLanguage })}`),
     [key],
   );
+
+  useEffect(() => setSelected([]), [key]);
+  const toggle = (id: number) => setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
   const update = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(sp);
@@ -109,6 +114,12 @@ export default function Library() {
             {sel("source", t("source"), (m?.source_keys || []).map((x) => [x, x]))}
             {sel("topic", t("topic"), (m?.topics || []).map((x) => [String(x.id), lang === "ar" ? x.name_ar : x.name_en]))}
             {sel("status", t("processing_status"), PROCESSING_VALUES.map((x) => [x, v(x)]))}
+            {sel("label", t("label"), (labelList.data || []).map((x) => [x.label, `${x.label} (${x.count})`]))}
+            <label className="check">
+              <input type="checkbox" checked={sp.get("show_deleted") === "true"}
+                onChange={(e) => update({ show_deleted: e.target.checked ? "true" : null })} />
+              {t("show_deleted")}
+            </label>
             <label className="field">
               <span>{t("date_from")}</span>
               <input type="date" value={sp.get("date_from") || ""} onChange={(e) => update({ date_from: e.target.value || null })} />
@@ -137,8 +148,14 @@ export default function Library() {
             ) : null}
             {d.results.length === 0 ? <p className="muted">{t("no_results")}</p> : (
               <div className="res-list">
+                <BulkBar ids={d.results.map((r) => r.resource.id)} selected={selected} setSelected={setSelected}
+                  deletedView={sp.get("show_deleted") === "true"}
+                  onDone={() => { state.reload(); labelList.reload(); }} />
                 {d.results.map((r) => (
-                  <div key={r.resource.id} className="res-result">
+                  <div key={r.resource.id} className="res-result res-select">
+                    <input type="checkbox" aria-label={`select ${r.resource.id}`} checked={selected.includes(r.resource.id)}
+                      onChange={() => toggle(r.resource.id)} />
+                    <div>
                     <ResourceItem r={r.resource} />
                     {r.passage ? (
                       <blockquote className="snippet" dir="auto">
@@ -151,6 +168,7 @@ export default function Library() {
                     ) : r.description_snippet ? (
                       <p className="snippet-desc" dir="auto">{r.description_snippet}</p>
                     ) : null}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -317,5 +335,79 @@ function AddByUrlForm() {
         </div>
       </form>
     </Card>
+  );
+}
+
+const PILLARS = ["children", "parents", "murabbi"];
+
+function BulkBar({ ids, selected, setSelected, deletedView, onDone }: {
+  ids: number[]; selected: number[]; setSelected: (x: number[]) => void; deletedView: boolean; onDone: () => void;
+}) {
+  const { t, v } = useI18n();
+  const [action, setAction] = useState(deletedView ? "restore" : "delete");
+  const [value, setValue] = useState("");
+  const [armed, setArmed] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { setAction(deletedView ? "restore" : "delete"); }, [deletedView]);
+  useEffect(() => { setValue(""); setArmed(false); }, [action]);
+  const allOnPage = ids.length > 0 && ids.every((i) => selected.includes(i));
+  const needsValue = ["set_access", "set_pillars", "add_label", "remove_label", "set_type"].includes(action);
+
+  const apply = async () => {
+    setMsg(null);
+    if (action === "delete" && !armed) { setArmed(true); return; }
+    try {
+      const body = { ids: selected, action, value: action === "set_pillars" ? [value] : value || null };
+      const r = await api.post<{ done: number; errors: string[] }>("/api/resources/bulk", body);
+      setMsg({ ok: true, text: `${t("done_n")} ${r.done}${r.errors.length ? ` · ${r.errors.join("; ")}` : ""}` });
+      setSelected([]);
+      setArmed(false);
+      onDone();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    }
+  };
+
+  return (
+    <div className="bulk-bar">
+      <label className="check">
+        <input type="checkbox" checked={allOnPage} onChange={(e) => setSelected(e.target.checked ? ids : [])} />
+        {t("select_all_page")}
+      </label>
+      <strong>{selected.length} {t("selected_n")}</strong>
+      <select aria-label={t("bulk_action")} value={action} onChange={(e) => setAction(e.target.value)}>
+        {deletedView ? <option value="restore">{t("act_restore")}</option> : <>
+          <option value="delete">{t("act_delete")}</option>
+          <option value="set_access">{t("act_set_access")}</option>
+          <option value="set_pillars">{t("act_set_pillars")}</option>
+          <option value="add_label">{t("act_add_label")}</option>
+          <option value="remove_label">{t("act_remove_label")}</option>
+          <option value="set_type">{t("act_set_type")}</option>
+        </>}
+      </select>
+      {action === "set_access" ? (
+        <select aria-label={t("access_status")} value={value} onChange={(e) => setValue(e.target.value)}>
+          <option value="">—</option>
+          {ACCESS_VALUES.map((x) => <option key={x} value={x}>{v(x)}</option>)}
+        </select>
+      ) : action === "set_pillars" ? (
+        <select aria-label={t("pillar")} value={value} onChange={(e) => setValue(e.target.value)}>
+          <option value="">—</option>
+          {PILLARS.map((x) => <option key={x} value={x}>{t(`pillar_${x}` as never)}</option>)}
+        </select>
+      ) : action === "set_type" ? (
+        <select aria-label={t("resource_type")} value={value} onChange={(e) => setValue(e.target.value)}>
+          <option value="">—</option>
+          {RESOURCE_TYPES.map((x) => <option key={x} value={x}>{v(x)}</option>)}
+        </select>
+      ) : needsValue ? (
+        <input type="text" dir="auto" placeholder={t("label")} value={value} onChange={(e) => setValue(e.target.value)} />
+      ) : null}
+      <button type="button" className={`btn ${action === "delete" ? "btn-danger" : "btn-primary"}`}
+        disabled={!selected.length || (needsValue && !value.trim())} onClick={apply}>
+        {action === "delete" && armed ? `${t("confirm_delete_n")} ${selected.length}` : t("apply")}
+      </button>
+      {msg ? <span className={msg.ok ? "small" : "small text-error"} role="status">{msg.text}</span> : null}
+    </div>
   );
 }

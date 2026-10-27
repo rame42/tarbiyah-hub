@@ -189,6 +189,8 @@ def acquire_job(ctx: JobContext) -> dict[str, Any]:
     r = ctx.session.get(Resource, ctx.payload["resource_id"])
     if r is None:
         raise PermanentFailure("resource deleted")
+    if r.deleted:
+        return {"skipped": "deleted by the user"}
     try:
         status = acquire(ctx.session, r)
     except AcquisitionError as e:
@@ -212,6 +214,8 @@ def process_job(ctx: JobContext) -> dict[str, Any]:
     r = ctx.session.get(Resource, ctx.payload["resource_id"])
     if r is None:
         raise PermanentFailure("resource deleted")
+    if r.deleted:
+        return {"skipped": "deleted by the user"}
     ocr = claude_ocr if claude().available() and getattr(claude(), "name", "claude") == "claude" else None
     status = process(ctx.session, r, ocr)
     if status in ("extracted", "low_quality", "metadata_only", "needs_ocr") and r.chunks:
@@ -232,6 +236,8 @@ def analyze_job(ctx: JobContext) -> dict[str, Any]:
     r = ctx.session.get(Resource, ctx.payload["resource_id"])
     if r is None:
         raise PermanentFailure("resource deleted")
+    if r.deleted:
+        return {"skipped": "deleted by the user"}
     try:
         return analyze_resource(ctx.session, r)
     except AIUnavailable:

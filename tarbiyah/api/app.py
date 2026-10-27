@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..bootstrap import init_app
@@ -141,15 +141,20 @@ def rebuild_report(day: str, s: Session = Depends(get_session)) -> dict[str, Any
 def list_resources(q: str = "", language: str | None = None, pillar: str | None = None, type: str | None = None,
                    access: str | None = None, source: str | None = None, topic: int | None = None,
                    date_from: str | None = None, date_to: str | None = None, status: str | None = None,
+                   label: str | None = None, show_deleted: bool = False,
                    page: int = 1, page_size: int = 25, cross_language: bool = True,
                    s: Session = Depends(get_session)) -> dict[str, Any]:
     f = SearchFilters(language=language, pillar=pillar, resource_type=type, access_status=access, source_key=source,
-                      topic_id=topic, discovered_from=date_from, discovered_to=date_to)
+                      topic_id=topic, discovered_from=date_from, discovered_to=date_to, label=label)
     offset = (max(1, page) - 1) * page_size
-    if q.strip():
+    if q.strip() and not show_deleted:
         res = search(s, q, f, limit=page_size, offset=offset, cross_language=cross_language)
         return {**res, "page": page, "page_size": page_size}
-    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None))
+    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None), Resource.deleted.is_(show_deleted))
+    if label:
+        import json as _json
+
+        stmt = stmt.where(Resource.labels.cast(String).like(f"%{_json.dumps(label)[1:-1]}%"))
     if language:
         stmt = stmt.where(Resource.language == language)
     if type:
@@ -249,11 +254,65 @@ def resource_text(rid: int, s: Session = Depends(get_session)) -> str:
     return absolute(r.text_path).read_text(encoding="utf-8")
 
 
+class BulkIn(BaseModel):
+    ids: list[int]
+    action: str
+    value: Any = None
+
+
+@app.post("/api/resources/bulk")
+def resources_bulk(body: BulkIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.manage import bulk
+
+    res = bulk(s, body.ids, body.action, body.value)
+    if res["errors"] and not res["done"]:
+        raise HTTPException(400, "; ".join(res["errors"]))
+    return res
+
+
+@app.get("/api/labels")
+def labels(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for (lbs,) in s.execute(select(Resource.labels).where(Resource.deleted.is_(False))):
+        for lb in lbs or []:
+            counts[lb] = counts.get(lb, 0) + 1
+    return [{"label": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+@app.patch("/api/resources/{rid}")
+def edit_resource(rid: int, body: dict[str, Any], s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.manage import update_resource
+
+    r = s.get(Resource, rid)
+    if r is None:
+        raise _404("resource")
+    try:
+        changed = update_resource(s, r, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"changed": changed}
+
+
+@app.delete("/api/resources/{rid}")
+def remove_resource(rid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.manage import delete_resource
+
+    r = s.get(Resource, rid)
+    if r is None:
+        raise _404("resource")
+    delete_resource(s, r)
+    return {"deleted": True, "note": "Removed from the library; it will not be collected again. Restore is possible."}
+
+
 @app.post("/api/resources/{rid}/{action}")
 def resource_action(rid: int, action: str, s: Session = Depends(get_session)) -> dict[str, Any]:
     r = s.get(Resource, rid)
     if r is None:
         raise _404("resource")
+    if action == "restore":
+        from ..ingest.manage import restore_resource
+
+        return {"status": restore_resource(s, r)}
     mapping = {"reprocess": ("process", "processing"), "reanalyze": ("analyze", "ai"), "acquire": ("acquire", "acquisition")}
     if action not in mapping:
         raise HTTPException(400, "unknown action")

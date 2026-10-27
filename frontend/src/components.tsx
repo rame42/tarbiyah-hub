@@ -370,6 +370,7 @@ export function ResourceItem({ r }: { r: ResourceBrief }) {
         <Badge value={r.access_status} />
         {r.has_file ? <span className="badge badge-info">{t("has_file")}</span> : null}
         <PillarBadges pillars={r.pillars} />
+        {(r.labels || []).map((lb) => <span key={lb} className="badge badge-label" dir="auto">🏷 {lb}</span>)}
         <WatchButton url={r.url} type={r.type} small />
         {r.url && !videoPlatform(r.url) && r.type !== "video" && !r.has_file ? (
           <a className="small" href={r.url} target="_blank" rel="noopener noreferrer">{t("open_link")} ↗</a>

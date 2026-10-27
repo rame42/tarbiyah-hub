@@ -91,6 +91,7 @@ export interface ResourceBrief {
   pillars: PillarScore[];
   discovered_at: string | null;
   has_file: boolean;
+  labels?: string[];
   role?: string;
 }
 

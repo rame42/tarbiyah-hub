@@ -10,11 +10,12 @@ other language, so an Arabic query also matches English text and vice versa.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import select, text
+from sqlalchemy import String, select, text
 from sqlalchemy.orm import Session
 
 from ..models import Chunk, GlossaryTerm, Resource, ResourcePillar, ResourceTopic
@@ -194,12 +195,14 @@ class SearchFilters:
     year_to: int | None = None
     discovered_from: str | None = None  # ISO date
     discovered_to: str | None = None
+    label: str | None = None
 
 
 def _filter_ids(session: Session, ids: list[int], f: SearchFilters) -> list[int]:
     if not ids:
         return ids
-    stmt = select(Resource.id).where(Resource.id.in_(ids), Resource.duplicate_of_id.is_(None))
+    stmt = select(Resource.id).where(Resource.id.in_(ids), Resource.duplicate_of_id.is_(None),
+                                     Resource.deleted.is_(False))
     if f.language:
         stmt = stmt.where(Resource.language == f.language)
     if f.resource_type:
@@ -216,6 +219,8 @@ def _filter_ids(session: Session, ids: list[int], f: SearchFilters) -> list[int]
         stmt = stmt.where(Resource.discovered_at >= f.discovered_from)
     if f.discovered_to:
         stmt = stmt.where(Resource.discovered_at < f.discovered_to + "T23:59:59.999")
+    if f.label:
+        stmt = stmt.where(Resource.labels.cast(String).like(f'%{json.dumps(f.label)[1:-1]}%'))
     if f.pillar:
         stmt = stmt.where(Resource.id.in_(select(ResourcePillar.resource_id).where(ResourcePillar.pillar == f.pillar)))
     if f.topic_id:
@@ -317,7 +322,7 @@ def search_chunks(session: Session, query: str, limit: int = 12, resource_ids: l
         rows = session.connection().execute(
             text("SELECT c.id, bm25(chunk_fts) FROM chunk_fts JOIN chunks c ON c.id = chunk_fts.rowid "
                  "JOIN resources r ON r.id = c.resource_id "
-                 "WHERE chunk_fts MATCH :m AND r.duplicate_of_id IS NULL ORDER BY 2 LIMIT :lim"),
+                 "WHERE chunk_fts MATCH :m AND r.duplicate_of_id IS NULL AND r.deleted = 0 ORDER BY 2 LIMIT :lim"),
             {"m": pq.match, "lim": limit * 4},
         ).all()
         ranked = [cid for cid, _ in rows]
@@ -338,7 +343,7 @@ def search_chunks(session: Session, query: str, limit: int = 12, resource_ids: l
         if c is None:
             continue
         r = session.get(Resource, c.resource_id)
-        if r is None or r.duplicate_of_id is not None:
+        if r is None or r.duplicate_of_id is not None or r.deleted:
             continue
         if resource_ids and c.resource_id not in resource_ids:
             continue
@@ -369,4 +374,5 @@ def resource_brief(r: Resource) -> dict[str, Any]:
         "pillars": [{"pillar": p.pillar, "score": round(p.score, 2)} for p in r.pillars],
         "discovered_at": r.discovered_at.isoformat() if r.discovered_at else None,
         "has_file": bool(r.local_path),
+        "labels": r.labels or [],
     }

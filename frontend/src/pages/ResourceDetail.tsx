@@ -1,10 +1,11 @@
 import { ReactNode, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs } from "../api";
 import {
   ActionButton, Async, Badge, BoolBadge, Card, ErrorBox, fmtDate, fmtNum, fmtTimestamp, KV, Loading, PillarBadge, Pre, TableWrap, useAsync, videoUrlAt, WatchButton
 } from "../components";
 import { useI18n } from "../i18n";
+import { ACCESS_VALUES, RESOURCE_TYPES } from "./Library";
 
 interface ResourceFull {
   id: number;
@@ -58,6 +59,9 @@ interface ResourceFull {
   processed_at: string | null;
   updated_at: string | null;
   pillars: { pillar: string; score: number; method: string }[];
+  labels?: string[] | null;
+  deleted?: boolean;
+  extra?: Record<string, unknown> | null;
   topics: { id: number; name_en: string; name_ar: string; score: number; method: string }[];
   entities: { id: number; type: string; name: string; role: string | null }[];
   claims: { id: number; type: string; statement: string; quote: string | null; page: number | null; evidence_type: string | null; verified: boolean | null; qa: string; generated_by: string; chunk_id: number | null }[];
@@ -115,6 +119,17 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
         {r.duplicate_of_id ? <Link to={`/resources/${r.duplicate_of_id}`}><Badge tone="muted">{v("duplicate")} → #{r.duplicate_of_id}</Badge></Link> : null}
       </div>
 
+      {(r.labels || []).length ? (
+        <div className="res-meta">{(r.labels || []).map((lb) => <span key={lb} className="badge badge-label">🏷 {lb}</span>)}</div>
+      ) : null}
+
+      {r.deleted ? (
+        <div className="alert alert-warn bulk-bar" role="status">
+          <span>{t("deleted_banner")}</span>
+          <ActionButton onRun={act("restore")}>{t("restore")}</ActionButton>
+        </div>
+      ) : null}
+
       <div className="toolbar spaced">
         <ActionButton onRun={act("reprocess")}>{t("reprocess")}</ActionButton>
         <ActionButton onRun={act("reanalyze")}>{t("reanalyze")}</ActionButton>
@@ -132,6 +147,8 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
       </div>
 
       {showText ? <FullText id={r.id} /> : null}
+
+      {!r.deleted ? <EditCard r={r} reload={reload} /> : null}
 
       <div className="grid-2">
         <Card title={t("metadata")}>
@@ -369,6 +386,91 @@ function Passages({ id, total, url }: { id: number; total: number; url?: string 
           <button type="button" className="btn btn-small" disabled={offset + limit >= n} onClick={() => setOffset(offset + limit)}>{t("next")}</button>
         </div>
       ) : null}
+    </Card>
+  );
+}
+
+const PILLAR_KEYS = ["children", "parents", "murabbi"];
+
+function EditCard({ r, reload }: { r: ResourceFull; reload: () => void }) {
+  const { t, v } = useI18n();
+  const nav = useNavigate();
+  const [title, setTitle] = useState(r.title);
+  const [type, setType] = useState(r.resource_type);
+  const [access, setAccess] = useState(r.access_status);
+  const [pillars, setPillars] = useState<string[]>(r.pillars.map((p) => p.pillar));
+  const [labels, setLabels] = useState((r.labels || []).join(", "));
+  const [notes, setNotes] = useState(String((r.extra || {}).user_notes || ""));
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const types = Array.from(new Set([...RESOURCE_TYPES, r.resource_type]));
+
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.patch(`/api/resources/${r.id}`, {
+        title, resource_type: type, access_status: access, pillars, notes,
+        labels: labels.split(/[,،]/).map((x) => x.trim()).filter(Boolean),
+      });
+      setMsg({ ok: true, text: t("ok_done") });
+      reload();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!armed) { setArmed(true); return; }
+    setBusy(true);
+    try {
+      await api.del(`/api/resources/${r.id}`);
+      nav("/library");
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title={t("edit_item")}>
+      <div className="form-grid">
+        <label>{t("title")}<input type="text" dir="auto" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        <label>{t("resource_type")}
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            {types.map((x) => <option key={x} value={x}>{v(x)}</option>)}
+          </select>
+        </label>
+        <label>{t("access_status")}
+          <select value={access} onChange={(e) => setAccess(e.target.value)}>
+            {ACCESS_VALUES.map((x) => <option key={x} value={x}>{v(x)}</option>)}
+          </select>
+        </label>
+        <fieldset className="check-row">
+          <legend>{t("pillar")}</legend>
+          {PILLAR_KEYS.map((p) => (
+            <label key={p} className="check">
+              <input type="checkbox" checked={pillars.includes(p)}
+                onChange={(e) => setPillars((cur) => e.target.checked ? [...cur, p] : cur.filter((x) => x !== p))} />
+              {t(`pillar_${p}` as never)}
+            </label>
+          ))}
+        </fieldset>
+        <label>{t("labels")}
+          <input type="text" dir="auto" value={labels} placeholder={t("labels_hint")} onChange={(e) => setLabels(e.target.value)} />
+        </label>
+        <label>{t("notes")}<textarea dir="auto" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+      </div>
+      <div className="toolbar spaced">
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{t("save")}</button>
+        <button type="button" className="btn btn-danger" disabled={busy} onClick={remove}>
+          {armed ? t("confirm_delete_n") : t("delete_item")}
+        </button>
+        {msg ? <span className={msg.ok ? "small" : "small text-error"} role="status">{msg.text}</span> : null}
+      </div>
+      <p className="small muted">{t("delete_explain")}</p>
     </Card>
   );
 }
