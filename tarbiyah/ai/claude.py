@@ -223,8 +223,9 @@ _provider: ClaudeProvider | None = None
 def claude() -> ClaudeProvider:
     global _provider
     if _provider is None:
-        if get_config().ai_provider.strip().lower() in ("openai_compatible", "openai", "other"):
-            from .openai_compat import OpenAICompatProvider
+        from .openai_compat import KNOWN_SERVICES, OpenAICompatProvider
+
+        if get_config().ai_provider.strip().lower() in ("openai_compatible", "other", *KNOWN_SERVICES):
 
             _provider = OpenAICompatProvider()
         else:

@@ -24,17 +24,36 @@ T = TypeVar("T", bound=BaseModel)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.S)
 
 
+# Friendly names for TH_AI_PROVIDER; the address is filled in when TH_AI_BASE_URL is empty.
+KNOWN_SERVICES = {
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "openai": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "deepseek": "https://api.deepseek.com",
+    "mistral": "https://api.mistral.ai/v1",
+}
+
+
+def base_url() -> str:
+    cfg = get_config()
+    return (cfg.ai_base_url or KNOWN_SERVICES.get(cfg.ai_provider.strip().lower(), "")).strip()
+
+
 class OpenAICompatProvider(ClaudeProvider):
-    name = "openai_compatible"
+    @property
+    def name(self) -> str:  # shown on the dashboard
+        p = get_config().ai_provider.strip().lower()
+        return p if p in KNOWN_SERVICES else "openai_compatible"
 
     def configured(self) -> bool:
         cfg = get_config()
-        return bool(cfg.ai_api_key and cfg.ai_base_url and cfg.ai_model and not cfg.ai_model.startswith("claude-"))
+        return bool(cfg.ai_api_key and base_url() and cfg.ai_model and not cfg.ai_model.startswith("claude-"))
 
     def status(self) -> dict[str, Any]:
         st = super().status()
         st["provider"] = self.name
-        st["base_url"] = get_config().ai_base_url
+        st["base_url"] = base_url()
         if not self.configured():
             st["problem"] = ("Set TH_AI_BASE_URL, TH_AI_API_KEY and TH_AI_MODEL (your provider's model name) in .env.")
         return st
@@ -44,7 +63,7 @@ class OpenAICompatProvider(ClaudeProvider):
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         cfg = get_config()
-        url = cfg.ai_base_url.rstrip("/") + "/chat/completions"
+        url = base_url().rstrip("/") + "/chat/completions"
         headers = {"Authorization": f"Bearer {cfg.ai_api_key}", "Content-Type": "application/json"}
         last: Exception | None = None
         for attempt in range(4):

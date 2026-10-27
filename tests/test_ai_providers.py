@@ -122,3 +122,18 @@ def test_free_plan_prices_zero(other_ai, monkeypatch):
     flush_usage()
     with session_scope() as s:
         assert get_usage(s, "ai_calls") == 1 and get_usage(s, "ai_cost_usd") == 0  # free plan: no spend counted
+
+
+def test_friendly_provider_name_fills_address(env, monkeypatch):
+    for k, v in {"TH_AI_PROVIDER": "gemini", "TH_AI_BASE_URL": "", "TH_AI_API_KEY": "k", "TH_AI_MODEL": "m"}.items():
+        monkeypatch.setenv(k, v)
+    from tarbiyah.ai import claude as claude_mod
+    from tarbiyah.ai.openai_compat import base_url
+    from tarbiyah.config import reset_config_cache
+
+    reset_config_cache()
+    claude_mod.set_provider(None)
+    p = claude_mod.claude()
+    assert p.name == "gemini" and p.configured()
+    assert base_url() == "https://generativelanguage.googleapis.com/v1beta/openai"
+    claude_mod.set_provider(None)
