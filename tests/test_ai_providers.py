@@ -137,3 +137,15 @@ def test_friendly_provider_name_fills_address(env, monkeypatch):
     assert p.name == "gemini" and p.configured()
     assert base_url() == "https://generativelanguage.googleapis.com/v1beta/openai"
     claude_mod.set_provider(None)
+
+
+def test_model_display_names_are_normalized(env, monkeypatch):
+    from tarbiyah.ai.openai_compat import model_name
+    from tarbiyah.config import reset_config_cache
+
+    for raw, want in [("Gemini 2.5 Flash", "gemini-2.5-flash"), ("models/gemini-2.5-flash", "gemini-2.5-flash"),
+                      ('"gemini-2.5-flash-lite"', "gemini-2.5-flash-lite"), ("gemini-2.5-pro", "gemini-2.5-pro")]:
+        monkeypatch.setenv("TH_AI_PROVIDER", "gemini")
+        monkeypatch.setenv("TH_AI_MODEL", raw)
+        reset_config_cache()
+        assert model_name() == want

@@ -41,7 +41,11 @@ def run(out=print) -> bool:
         if provider not in KNOWN_SERVICES and provider not in ("openai_compatible", "other"):
             out(f"PROBLEM: unknown provider name '{provider}'. Use one of: claude, {', '.join(KNOWN_SERVICES)}, openai_compatible.")
             return False
-        key, model, url = cfg.ai_api_key, cfg.ai_model, base_url()
+        from .ai.openai_compat import model_name
+
+        key, model, url = cfg.ai_api_key, model_name(), base_url()
+        if model != cfg.ai_model.strip():
+            out(f"(model name '{cfg.ai_model.strip()}' is used as '{model}')")
     out(f"Service address: {url or '(empty)'}")
     out(f"Model (TH_AI_MODEL): {model or '(empty)'}")
     out(f"Key (TH_AI_API_KEY): {_mask(key) if key else '(empty)'}\n")
@@ -92,8 +96,20 @@ def run(out=print) -> bool:
     if "key" in low and ("invalid" in low or "not valid" in low or "expired" in low):
         hint = ("The key was not accepted. Click 'Copy key' in AI Studio again and paste it right after "
                 "TH_AI_API_KEY= with no spaces or quotes. If it still fails, create a new key.")
-    elif "model" in low and ("not found" in low or "not supported" in low or "invalid" in low):
-        hint = "The model name is wrong. Copy the exact model name from the service's model list."
+    elif "model" in low and ("not found" in low or "not supported" in low or "invalid" in low or "format" in low):
+        hint = "The model name is wrong. Put one of the names listed below after TH_AI_MODEL= in .env."
+        try:
+            from .ai.openai_compat import list_models
+
+            names = list_models()
+            pref = [n for n in names if "flash" in n] + [n for n in names if "flash" not in n]
+            if pref:
+                out("Model names your key can use (Flash models first):")
+                for n in pref[:25]:
+                    out("   " + n)
+                out("")
+        except Exception as e:  # noqa: BLE001 - listing is a convenience
+            out(f"(Could not list models: {e})")
     else:
         hint = hints.get(r.status_code, "Read the message above; send it to your helper if unclear.")
     out("FIX: " + hint)

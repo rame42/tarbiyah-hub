@@ -35,6 +35,26 @@ KNOWN_SERVICES = {
 }
 
 
+def model_name() -> str:
+    """Accept display names too: 'Gemini 2.5 Flash' -> 'gemini-2.5-flash'; strip quotes and 'models/'."""
+    m = get_config().ai_model.strip().strip("\"'").strip()
+    if m.lower().startswith("models/"):
+        m = m[7:]
+    if " " in m or (m != m.lower() and get_config().ai_provider.strip().lower() == "gemini"):
+        m = "-".join(m.lower().split())
+    return m
+
+
+def list_models() -> list[str]:
+    """Model ids the key can use (OpenAI-style GET /models)."""
+    cfg = get_config()
+    r = requests.get(base_url().rstrip("/") + "/models", headers={"Authorization": f"Bearer {cfg.ai_api_key}"},
+                     timeout=30)
+    r.raise_for_status()
+    ids = [str(m.get("id", "")) for m in (r.json().get("data") or [])]
+    return sorted({i[7:] if i.startswith("models/") else i for i in ids if i})
+
+
 def base_url() -> str:
     cfg = get_config()
     return (cfg.ai_base_url or KNOWN_SERVICES.get(cfg.ai_provider.strip().lower(), "")).strip()
@@ -86,7 +106,7 @@ class OpenAICompatProvider(ClaudeProvider):
 
     def _complete(self, system: str, content: str, max_tokens: int, response_format: dict | None) -> tuple[str, Any]:
         self._check_budget()
-        model = get_config().ai_model
+        model = model_name()
         body: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "system", "content": f"{system}\n\n{UNTRUSTED_NOTICE}"},
