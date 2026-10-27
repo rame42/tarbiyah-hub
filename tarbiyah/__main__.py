@@ -12,6 +12,7 @@
   cycle                     queue one research cycle now
   drain [--seconds N]       process queued jobs in the foreground until the queue is empty
   report [--day YYYY-MM-DD] build (or rebuild) a daily report
+  test-ai                   check the AI settings in .env and send one test message
   update [--zip FILE]       update the program in place (keeps data/, .env, settings)
   backup [--dest DIR]       consistent backup of the database and files
   restore ARCHIVE           restore a backup archive (stop web/worker first)
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--day")
     bk = sub.add_parser("backup")
     bk.add_argument("--dest")
+    sub.add_parser("test-ai")
     up = sub.add_parser("update")
     up.add_argument("--zip")
     up.add_argument("--check", action="store_true")
@@ -72,6 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     _setup_logging()
+    if args.cmd == "test-ai":
+        from .aitest import run
+
+        return 0 if run() else 1
     if args.cmd == "update":  # replaces program files only; runs before the app is loaded
         from .updater import check, update
 
