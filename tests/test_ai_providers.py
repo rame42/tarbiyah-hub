@@ -110,3 +110,15 @@ def test_assistant_runs_on_other_provider(other_ai, fixtures_dir):
         res = answer(s, "What parenting style supports emotional regulation?", "en")
     assert res["mode"] == "ai" and res["expanded_terms"][0] == "parenting style"
     assert res["citations"][0]["verified"]  # quote checked against the stored passage, same as with Claude
+
+
+def test_free_plan_prices_zero(other_ai, monkeypatch):
+    monkeypatch.setenv("TH_AI_PRICE_INPUT", "0")
+    monkeypatch.setenv("TH_AI_PRICE_OUTPUT", "0")
+    from tarbiyah.config import reset_config_cache
+
+    reset_config_cache()
+    other_ai.structured("query_terms", "sys", "q", S.QueryTerms)
+    flush_usage()
+    with session_scope() as s:
+        assert get_usage(s, "ai_calls") == 1 and get_usage(s, "ai_cost_usd") == 0  # free plan: no spend counted

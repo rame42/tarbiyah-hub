@@ -125,7 +125,7 @@ class ClaudeProvider:
         cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
         ot = int(getattr(usage, "output_tokens", 0) or 0)
         cfg = get_config()
-        if cfg.ai_price_input or cfg.ai_price_output:
+        if cfg.ai_price_input is not None and cfg.ai_price_output is not None:
             pin, pout = cfg.ai_price_input, cfg.ai_price_output
         else:
             pin, pout = PRICES.get(model, (4.0, 20.0))  # unknown models: counted at a conservative rate
