@@ -2,7 +2,7 @@ import { ReactNode, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, qs } from "../api";
 import {
-  ActionButton, Async, Badge, BoolBadge, Card, ErrorBox, fmtDate, fmtNum, fmtTimestamp, KV, Loading, PillarBadge, Pre, TableWrap, useAsync,
+  ActionButton, Async, Badge, BoolBadge, Card, ErrorBox, fmtDate, fmtNum, fmtTimestamp, KV, Loading, PillarBadge, Pre, TableWrap, useAsync, videoUrlAt, WatchButton
 } from "../components";
 import { useI18n } from "../i18n";
 
@@ -125,7 +125,10 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
         <button type="button" className="btn" onClick={() => setShowText((x) => !x)}>
           {showText ? t("hide_full_text") : t("full_text")}
         </button>
-        {r.url ? <a className="btn btn-ghost" href={r.url} target="_blank" rel="noopener noreferrer">{t("external_link")} ↗</a> : null}
+        <WatchButton url={r.url} type={r.resource_type} />
+        {r.url && !(r.resource_type === "video" || /youtube\.com|youtu\.be|tiktok\.com/i.test(r.url)) ? (
+          <a className="btn btn-ghost" href={r.url} target="_blank" rel="noopener noreferrer">{t("external_link")} ↗</a>
+        ) : null}
       </div>
 
       {showText ? <FullText id={r.id} /> : null}
@@ -286,7 +289,7 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
         )}
       </Card>
 
-      <Passages id={r.id} total={r.chunk_count} />
+      <Passages id={r.id} total={r.chunk_count} url={r.url} />
 
       <div className="grid-2">
         <Card title={t("history")}>
@@ -334,7 +337,7 @@ function FullText({ id }: { id: number }) {
 
 interface Passage { id: number; seq: number; page: number | null; heading: string | null; lang: string | null; timestamp: number | null; text: string }
 
-function Passages({ id, total }: { id: number; total: number }) {
+function Passages({ id, total, url }: { id: number; total: number; url?: string | null }) {
   const { t } = useI18n();
   const [offset, setOffset] = useState(0);
   const limit = 10;
@@ -350,7 +353,9 @@ function Passages({ id, total }: { id: number; total: number }) {
           <div className="passage-meta">
             <span className="badge badge-neutral">#{p.seq + 1}</span>
             {p.page !== null ? <span>{t("page_short")} {p.page}</span> : null}
-            {p.timestamp !== null ? <span>⏱ {fmtTimestamp(p.timestamp)}</span> : null}
+            {p.timestamp !== null ? (url ? (
+              <a href={videoUrlAt(url, p.timestamp)} target="_blank" rel="noopener noreferrer" title={t("play_from_here")}>⏱ {fmtTimestamp(p.timestamp)} ▶</a>
+            ) : <span>⏱ {fmtTimestamp(p.timestamp)}</span>) : null}
             {p.lang ? <span className="muted">{p.lang}</span> : null}
             {p.heading ? <strong dir="auto">{p.heading}</strong> : null}
           </div>

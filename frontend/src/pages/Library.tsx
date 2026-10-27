@@ -1,13 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, getMeta, Meta, qs, ResourceBrief } from "../api";
-import { ActionButton, Async, Card, ErrorBox, Pager, ResourceItem, useAsync } from "../components";
+import { ActionButton, Async, Card, ErrorBox, fmtTimestamp, Pager, ResourceItem, useAsync, videoUrlAt } from "../components";
 import { useI18n } from "../i18n";
 
 interface SearchResult {
   resource: ResourceBrief;
   score?: number;
-  passage: { chunk_id: number; page: number | null; text: string; lang: string | null } | null;
+  passage: { chunk_id: number; page: number | null; text: string; lang: string | null; timestamp?: number | null } | null;
   description_snippet: string | null;
 }
 interface SearchResponse {
@@ -144,6 +144,9 @@ export default function Library() {
                       <blockquote className="snippet" dir="auto">
                         <span>{r.passage.text}</span>
                         {r.passage.page ? <span className="muted small"> — {t("page_short")} {r.passage.page}</span> : null}
+                        {r.passage.timestamp != null && r.resource.url ? (
+                          <> {" "}<a className="small" href={videoUrlAt(r.resource.url, r.passage.timestamp)} target="_blank" rel="noopener noreferrer">⏱ {fmtTimestamp(r.passage.timestamp)} ▶</a></>
+                        ) : null}
                       </blockquote>
                     ) : r.description_snippet ? (
                       <p className="snippet-desc" dir="auto">{r.description_snippet}</p>

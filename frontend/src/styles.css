@@ -1178,3 +1178,13 @@ q.quote {
     min-inline-size: 180px;
   }
 }
+
+/* "Watch on YouTube": videos open on their own site (they are never downloaded) */
+.btn-watch {
+  background: #c4302b;
+  border-color: #c4302b;
+  color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn-watch:hover { background: #a82722; border-color: #a82722; color: #fff; }

@@ -292,7 +292,8 @@ def search(session: Session, query: str, filters: SearchFilters | None = None, l
         if rid in best_chunk:
             c = session.get(Chunk, best_chunk[rid][1])
             if c is not None:
-                hit = {"chunk_id": c.id, "page": c.page_start, "text": snippet(c.text, terms), "lang": c.lang}
+                hit = {"chunk_id": c.id, "page": c.page_start, "text": snippet(c.text, terms), "lang": c.lang,
+                       "timestamp": c.timestamp_start}
         results.append({
             "resource": resource_brief(r),
             "score": round(scores[rid], 3),

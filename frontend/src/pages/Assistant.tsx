@@ -1,7 +1,7 @@
 import { FormEvent, ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Badge, BoolBadge, Card, ErrorBox, fmtTimestamp } from "../components";
+import { Badge, BoolBadge, Card, ErrorBox, fmtTimestamp, videoUrlAt, WatchButton } from "../components";
 import { useI18n } from "../i18n";
 
 interface EvidenceItem {
@@ -193,9 +193,12 @@ export default function Assistant() {
                   {e.authors ? <span dir="auto" className="small">{e.authors}</span> : null}
                   {e.year ? <span className="small">{e.year}</span> : null}
                   {e.page !== null ? <span className="small">{t("page_short")} {e.page}</span> : null}
-                  {e.timestamp !== null ? <span className="small">⏱ {fmtTimestamp(e.timestamp)}</span> : null}
+                  {e.timestamp !== null ? (e.url ? (
+                    <a className="small" href={videoUrlAt(e.url, e.timestamp)} target="_blank" rel="noopener noreferrer">⏱ {fmtTimestamp(e.timestamp)} ▶</a>
+                  ) : <span className="small">⏱ {fmtTimestamp(e.timestamp)}</span>) : null}
                   <Badge value={e.access_status} />
-                  {e.url ? <a href={e.url} target="_blank" rel="noopener noreferrer" className="small">{t("open_link")} ↗</a> : null}
+                  {e.url && /youtube\.com|youtu\.be|tiktok\.com/i.test(e.url) ? <WatchButton url={e.url} small /> :
+                    e.url ? <a href={e.url} target="_blank" rel="noopener noreferrer" className="small">{t("open_link")} ↗</a> : null}
                 </div>
                 <p dir="auto" className="pre-line content-text">{e.text}</p>
               </div>

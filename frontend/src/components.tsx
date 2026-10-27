@@ -319,6 +319,41 @@ export function ResourceLink({ r }: { r: Pick<ResourceBrief, "id" | "title"> }) 
   );
 }
 
+/** Link to the original video, optionally at a given second (YouTube supports t=). */
+export function videoUrlAt(url: string, seconds?: number | null): string {
+  if (seconds === null || seconds === undefined || seconds < 0) return url;
+  try {
+    const u = new URL(url);
+    if (/(^|\.)youtube\.com$|(^|\.)youtu\.be$/.test(u.hostname)) {
+      u.searchParams.set("t", `${Math.floor(seconds)}s`);
+      return u.toString();
+    }
+  } catch {
+    /* not a valid URL: return it unchanged */
+  }
+  return url;
+}
+
+function videoPlatform(url: string | null | undefined): "youtube" | "tiktok" | null {
+  if (!url) return null;
+  if (/youtube\.com|youtu\.be/i.test(url)) return "youtube";
+  if (/tiktok\.com/i.test(url)) return "tiktok";
+  return null;
+}
+
+/** "Watch on YouTube" button; videos are never downloaded, they open on their own site. */
+export function WatchButton({ url, type, seconds, small }: { url: string | null | undefined; type?: string; seconds?: number | null; small?: boolean }) {
+  const { t } = useI18n();
+  const platform = videoPlatform(url);
+  if (!url || (!platform && type !== "video")) return null;
+  const label = platform === "youtube" ? t("watch_youtube") : platform === "tiktok" ? t("watch_tiktok") : t("watch_video");
+  return (
+    <a className={`btn btn-watch${small ? " btn-small" : ""}`} href={videoUrlAt(url, seconds)} target="_blank" rel="noopener noreferrer">
+      ▶ {label} ↗
+    </a>
+  );
+}
+
 /** One-line resource summary used in lists. */
 export function ResourceItem({ r }: { r: ResourceBrief }) {
   const { t } = useI18n();
@@ -335,6 +370,10 @@ export function ResourceItem({ r }: { r: ResourceBrief }) {
         <Badge value={r.access_status} />
         {r.has_file ? <span className="badge badge-info">{t("has_file")}</span> : null}
         <PillarBadges pillars={r.pillars} />
+        <WatchButton url={r.url} type={r.type} small />
+        {r.url && !videoPlatform(r.url) && r.type !== "video" && !r.has_file ? (
+          <a className="small" href={r.url} target="_blank" rel="noopener noreferrer">{t("open_link")} ↗</a>
+        ) : null}
       </div>
     </div>
   );
