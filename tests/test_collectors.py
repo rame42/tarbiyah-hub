@@ -1,0 +1,189 @@
+"""Collectors against a real bilingual website served over HTTP on localhost, plus
+contract tests of the API adapters against response shapes from their public documentation.
+
+NOTE: the API contract tests do not contact OpenAlex/Crossref/etc. (the development
+environment had no access to them); they verify parsing and licensing decisions only.
+"""
+from datetime import timedelta
+
+import pytest
+
+from tarbiyah.db import session_scope, utcnow
+from tarbiyah.jobs.scheduler import dispatch_due_sources
+from tarbiyah.models import CrawlUrl, Resource, Source
+
+from .conftest import drain
+
+
+def _sources(site, **over):
+    base = site["base"]
+    cfg = {
+        "site-ar": {"start_urls": [base + "/ar/index.html"], "allowed_domains": ["127.0.0.1"],
+                    "include_patterns": ["/ar/", "/docs/"], "language": "ar", "min_interval_seconds": 0.1},
+        "site-en": {"start_urls": [base + "/en/index.html"], "allowed_domains": ["127.0.0.1"],
+                    "include_patterns": ["/en/", "/docs/"], "download_documents": True, "min_interval_seconds": 0.1},
+    }
+    with session_scope() as s:
+        for src in s.query(Source):
+            src.enabled = False
+        s.add(Source(key="site-ar", adapter="web_crawler", name="ar", enabled=True, config={"role": "monitor", **cfg["site-ar"], **over}))
+        s.add(Source(key="site-en", adapter="web_crawler", name="en", enabled=True, config={"role": "monitor", **cfg["site-en"], **over}))
+        s.add(Source(key="podcast", adapter="rss", name="pod", enabled=True,
+                     config={"role": "monitor", "feeds": [base + "/feed.xml"], "fetch_full_text": False}))
+        s.add(Source(key="tg", adapter="telegram", name="tg", enabled=True,
+                     config={"role": "monitor", "channels": ["testchannel"], "base_url": base + "/tg", "max_pages": 1}))
+
+
+def test_arabic_and_english_sites_feeds_and_telegram(env, site):
+    _sources(site)
+    assert dispatch_due_sources() == 4
+    drain(120, concurrency=3)
+    with session_scope() as s:
+        ar = s.query(Resource).filter(Resource.source_key == "site-ar", Resource.resource_type == "article").all()
+        en = s.query(Resource).filter(Resource.source_key == "site-en", Resource.resource_type == "article").all()
+        assert len(ar) == 3 and all(r.language == "ar" for r in ar)
+        assert all(r.access_status == "open_license" for r in ar)  # rel=license CC-BY detected on page
+        assert len(en) == 2 and all(r.language == "en" for r in en)
+        assert all(r.acquisition_status == "text_collected" and r.processing_status == "extracted" for r in ar + en)
+        # documents: Arabic site has no permission/licence -> link only; English site permits downloads
+        ar_doc = s.query(Resource).filter(Resource.source_key == "site-ar", Resource.resource_type == "document").one()
+        assert ar_doc.acquisition_status == "metadata_only" and not ar_doc.local_path
+        en_doc = s.query(Resource).filter(Resource.source_key == "site-en", Resource.resource_type == "document").one()
+        assert en_doc.acquisition_status == "downloaded" and en_doc.processing_status == "extracted"
+        assert en_doc.title.startswith("Positive Parenting")  # title from the PDF, not the file name
+        # robots.txt: /private/ is never fetched
+        assert not s.query(CrawlUrl).filter(CrawlUrl.url.like("%private%"), CrawlUrl.status == "done").count()
+        assert not s.query(Resource).filter(Resource.url.like("%private%")).count()
+        # podcast transcript collected with timestamps
+        ep = s.query(Resource).filter(Resource.source_key == "podcast", Resource.title.like("Episode 1%")).one()
+        assert ep.extra["has_transcript"] and any(c.timestamp_start is not None for c in ep.chunks)
+        assert "patience and dialogue" in " ".join(c.text for c in ep.chunks)
+        tg = s.query(Resource).filter(Resource.source_key == "tg").all()
+        assert len(tg) == 3 and {r.language for r in tg} == {"ar", "en"}
+        for key in ("site-ar", "site-en", "podcast", "tg"):
+            src = s.query(Source).filter(Source.key == key).one()
+            assert src.health == "ok" and src.last_success_at is not None
+
+
+def test_incremental_recrawl_detects_updates_without_duplicates(env, site):
+    _sources(site, recrawl_hours=0.0001)
+    dispatch_due_sources()
+    drain(120, concurrency=3)
+    with session_scope() as s:
+        n_before = s.query(Resource).count()
+        for src in s.query(Source):
+            src.next_run_at = utcnow() - timedelta(seconds=1)
+    page = site["root"] / "ar" / "articles" / "qudwa.html"
+    original = page.read_text(encoding="utf-8")
+    page.write_text(original.replace("القدوة الحسنة أقوى", "القدوة الصالحة أقوى (نسخة محدثة)"), encoding="utf-8")
+    try:
+        dispatch_due_sources()
+        drain(120, concurrency=3)
+        with session_scope() as s:
+            assert s.query(Resource).count() == n_before  # nothing duplicated
+            r = s.query(Resource).filter(Resource.url.like("%qudwa.html")).one()
+            assert r.extra.get("content_updated_at")
+            assert "نسخة محدثة" in " ".join(c.text for c in r.chunks)  # re-indexed new version
+            src = s.query(Source).filter(Source.key == "site-ar").one()
+            assert src.last_result["updated"] == 1 and src.last_result["new"] == 0
+            tg = s.query(Source).filter(Source.key == "tg").one()
+            assert tg.last_result["new"] == 0  # telegram: only messages newer than last run
+    finally:
+        page.write_text(original, encoding="utf-8")
+
+
+def test_local_inbox_folder_import(env, fixtures_dir):
+    import shutil
+
+    inbox = env / "inbox"
+    shutil.copy(fixtures_dir / "framework.docx", inbox / "framework.docx")
+    dispatch_due_sources()
+    drain(60)
+    with session_scope() as s:
+        r = s.query(Resource).filter(Resource.source_key == "inbox").one()
+        assert r.processing_status == "extracted" and r.access_status == "user_provided"
+    assert (inbox / "imported" / "framework.docx").exists()
+
+
+# ----------------------------------------------------------------------- API adapter contracts
+
+def test_openalex_parsing_and_licence(env):
+    from tarbiyah.sources.academic import OpenAlexAdapter
+
+    w = {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1/x", "display_name": "Parenting styles in Muslim families",
+         "publication_year": 2021, "publication_date": "2021-05-01", "language": "en", "type": "article",
+         "open_access": {"is_oa": True, "oa_status": "gold"},
+         "best_oa_location": {"pdf_url": "https://j.org/x.pdf", "landing_page_url": "https://j.org/x", "license": "cc-by"},
+         "primary_location": {"landing_page_url": "https://j.org/x", "source": {"display_name": "J Fam"}},
+         "authorships": [{"author": {"display_name": "A. Author"}, "institutions": [{"display_name": "Univ X"}]}],
+         "abstract_inverted_index": {"Parents": [0], "matter": [1]}, "referenced_works": ["https://openalex.org/W2"],
+         "keywords": [{"display_name": "parenting"}]}
+    d = OpenAlexAdapter().parse(w)
+    assert d.description == "Parents matter" and d.download_url == "https://j.org/x.pdf" and d.access.download_permitted
+    w2 = {**w, "best_oa_location": {"pdf_url": "https://j.org/y.pdf", "license": None}, "open_access": {"is_oa": True, "oa_status": "green"}}
+    d2 = OpenAlexAdapter().parse(w2)
+    assert not d2.access.download_permitted and d2.download_url is None and d2.access.access_status == "open_access"
+
+
+def test_crossref_doaj_eric_parsing(env):
+    from tarbiyah.sources.academic import CrossrefAdapter, DoajAdapter, EricAdapter
+
+    c = CrossrefAdapter().parse({"DOI": "10.5/abc", "title": ["Teacher training"], "author": [{"given": "S", "family": "Ali"}],
+                                 "issued": {"date-parts": [[2019, 3]]}, "type": "journal-article", "publisher": "P",
+                                 "abstract": "<jats:p>Abstract text</jats:p>",
+                                 "license": [{"URL": "http://creativecommons.org/licenses/by/4.0/"}],
+                                 "link": [{"URL": "https://p.org/a.pdf", "content-type": "application/pdf"}]})
+    assert c.year == 2019 and c.published_date == "2019-03" and c.description == "Abstract text"
+    assert c.authors == ["S Ali"] and c.access.download_permitted and c.download_url == "https://p.org/a.pdf"
+    d = DoajAdapter().parse({"id": "x1", "bibjson": {"title": "التربية الأسرية", "year": "2020",
+                             "journal": {"title": "مجلة", "language": ["AR"], "license": [{"type": "CC BY-NC"}]},
+                             "link": [{"type": "fulltext", "url": "https://j.dz/a.pdf"}],
+                             "identifier": [{"type": "doi", "id": "10.9/z"}], "author": [{"name": "أحمد"}]}})
+    assert d.language == "ar" and d.access.download_permitted and d.download_url == "https://j.dz/a.pdf"
+    e = EricAdapter().parse({"id": "ED123", "title": "Mentoring", "e_fulltextauth": 1, "publicationdateyear": 2018,
+                             "author": ["B"], "language": ["English"], "publicationtype": ["Reports - Research"]})
+    assert e.download_url == "https://files.eric.ed.gov/fulltext/ED123.pdf" and e.resource_type == "report"
+    e2 = EricAdapter().parse({"id": "EJ9", "title": "Journal art", "e_fulltextauth": 0})
+    assert e2.download_url is None and not e2.access.download_permitted
+
+
+def test_book_sources_lending_paid_and_public_domain(env):
+    from tarbiyah.sources.books import GoogleBooksAdapter, GutendexAdapter, InternetArchiveAdapter, OpenLibraryAdapter
+
+    ia = InternetArchiveAdapter()
+    lending = ia.parse({"identifier": "b1", "title": "Book", "collection": ["inlibrary", "printdisabled"]})
+    assert lending.access.access_status == "lending_only" and lending.download_url is None
+    pd = ia.parse({"identifier": "b2", "title": "Old", "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+                   "language": "Arabic", "collection": ["opensource"]})
+    assert pd.access.download_permitted and pd.language == "ar" and pd.extra["resolver"] == "internet_archive"
+    unknown = ia.parse({"identifier": "b3", "title": "Upload without rights", "collection": ["opensource"]})
+    assert not unknown.access.download_permitted  # publicly viewable is not a licence
+    ol = OpenLibraryAdapter().parse({"key": "/works/OL1W", "title": "T", "ebook_access": "borrowable", "ia": ["x"]})
+    assert ol.access.access_status == "lending_only"
+    g = GutendexAdapter().parse({"id": 5, "title": "G", "copyright": False, "languages": ["en"],
+                                 "formats": {"application/epub+zip": "https://www.gutenberg.org/5.epub"}})
+    assert g.access.download_permitted and g.download_url.endswith(".epub")
+    paid = GoogleBooksAdapter().parse({"id": "gb1", "volumeInfo": {"title": "تربية الأبناء", "language": "ar",
+                                       "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9781234567897"}]},
+                                       "saleInfo": {"saleability": "FOR_SALE", "retailPrice": {"amount": 4.99, "currencyCode": "USD"},
+                                                    "buyLink": "https://play.google.com/store/books/details?id=gb1"},
+                                       "accessInfo": {"publicDomain": False}})
+    assert paid.access.access_status == "paid" and paid.price == "4.99" and paid.purchase_url and paid.download_url is None
+
+
+def test_social_adapters_parsing_and_credentials(env):
+    from tarbiyah.sources.base import NotConfigured
+    from tarbiyah.sources.social import FacebookAdapter, RedditAdapter, XAdapter
+    from tarbiyah.sources.youtube import video_id_from_url
+
+    assert video_id_from_url("https://youtu.be/dQw4w9WgXcQ?t=1") == "dQw4w9WgXcQ"
+    r = RedditAdapter()._parse({"id": "a", "name": "t3_a", "title": "Raising kids", "selftext": "How?", "subreddit": "islam",
+                                "permalink": "/r/islam/comments/a/x/", "created_utc": 1700000000}, None)
+    assert r.url == "https://www.reddit.com/r/islam/comments/a/x/" and r.published_date == "2023-11-14"
+    x = XAdapter()._parse({"data": [{"id": "9", "text": "تربية", "author_id": "1", "created_at": "2026-01-01T00:00:00Z"}],
+                           "includes": {"users": [{"id": "1", "username": "acc"}]}}, None)
+    assert x[0].url == "https://x.com/acc/status/9"
+    for adapter in (RedditAdapter(), XAdapter(), FacebookAdapter()):
+        assert not adapter.is_configured()
+        with pytest.raises(NotConfigured):
+            adapter.require()
