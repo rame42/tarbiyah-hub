@@ -50,6 +50,7 @@ limited by daily caps on number and cost. See [docs/CONFIGURATION.md](docs/CONFI
 - [docs/INSTALL.md](docs/INSTALL.md): installation, start/stop/resume, auto-start, troubleshooting
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Claude, budgets, optional APIs, OCR, settings
 - [docs/SOURCES.md](docs/SOURCES.md): adding websites, feeds, channels, research topics, new adapters
+- [docs/APIFY.md](docs/APIFY.md): collecting TikTok, YouTube, Facebook, Instagram, X, Reddit via Apify
 - [docs/BACKUP.md](docs/BACKUP.md): backup and restore
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the system is built
 - [docs/STATUS.md](docs/STATUS.md): what is complete, test results, limitations, next steps

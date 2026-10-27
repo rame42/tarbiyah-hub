@@ -37,6 +37,7 @@ class AdapterInfo:
     config_fields: dict[str, str] = field(default_factory=dict)  # name -> help text
     default_config: dict[str, Any] = field(default_factory=dict)
     default_enabled: bool = False
+    seed_search_source: bool = True  # False: searches run only through configured sources (e.g. Apify)
 
 
 @dataclass

@@ -22,6 +22,7 @@ from .books import GoogleBooksAdapter, GutendexAdapter, InternetArchiveAdapter, 
 from .feeds import RssAdapter
 from .social import FacebookAdapter, InstagramAdapter, RedditAdapter, TelegramAdapter, TikTokAdapter, XAdapter
 from .web import WebCrawlerAdapter
+from .apify import ApifyAdapter
 from .youtube import YouTubeAdapter
 
 
@@ -51,7 +52,7 @@ ADAPTERS: dict[str, SourceAdapter] = {a.info.name: a for a in [
     OpenAlexAdapter(), CrossrefAdapter(), DoajAdapter(), EricAdapter(), CoreAdapter(),
     InternetArchiveAdapter(), OpenLibraryAdapter(), GutendexAdapter(), GoogleBooksAdapter(),
     WebCrawlerAdapter(), RssAdapter(), YouTubeAdapter(), TelegramAdapter(), RedditAdapter(),
-    FacebookAdapter(), InstagramAdapter(), XAdapter(), TikTokAdapter(), LocalFolderAdapter(),
+    FacebookAdapter(), InstagramAdapter(), XAdapter(), TikTokAdapter(), LocalFolderAdapter(), ApifyAdapter(),
 ]}
 
 
@@ -86,7 +87,7 @@ def seed_sources() -> None:
     with session_scope() as s:
         have = {src.key for src in s.execute(select(Source)).scalars()}
         for name, a in ADAPTERS.items():
-            if a.supports("search") and name not in have:
+            if a.supports("search") and a.info.seed_search_source and name not in have:
                 s.add(Source(key=name, adapter=name, name=a.info.label,
                              enabled=a.info.default_enabled and a.is_configured(),
                              config={"role": "search"}, schedule_minutes=a.info.default_schedule_minutes,

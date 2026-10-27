@@ -36,6 +36,7 @@ These are fully implemented, but they could not be run against the real services
   documented response format. Run the system with internet access and check each source's health on the Sources page.
 - **Claude calls** (`ANTHROPIC_API_KEY` was not available). The request code follows the current Anthropic Python SDK
   (structured outputs, streaming for long text, refusal fallbacks), but no real Claude response has been processed yet.
+- **Apify** (tested against a local stand-in of its API: run, poll, dataset, caps, resume; not against apify.com).
 - **Real Arabic/English websites** (tested on a local bilingual site with the same structures).
 - **Windows**: scripts are written for Windows (`.bat`, PowerShell auto-start, `msvcrt` file locks), but the tests ran on Linux.
 - **Tesseract OCR** (not installed in the test environment; the code path is implemented).

@@ -59,11 +59,12 @@ def system_status(session: Session) -> dict[str, Any]:
         "storage": {"used_gb": round(used_bytes(session) / 1024 ** 3, 3), "limit_gb": settings["storage_limit_gb"],
                     "disk_free_gb": round(disk.free / 1024 ** 3, 2), "data_dir": str(cfg.data_dir)},
         "usage_today": {k: round(get_usage(session, k), 4) for k in
-                        ("http_requests", "downloads", "download_mb", "ai_calls", "ai_cost_usd")},
+                        ("http_requests", "downloads", "download_mb", "ai_calls", "ai_cost_usd", "apify_runs")},
         "limits": {k: settings[k] for k in ("daily_http_request_limit", "daily_download_limit",
                                              "daily_download_mb_limit", "daily_ai_call_limit", "daily_ai_budget_usd",
                                              "worker_concurrency", "max_questions_per_cycle", "research_cycle_minutes")},
         "credentials": {k: bool(getattr(cfg, k)) for k in
                         ("anthropic_api_key", "voyage_api_key", "youtube_api_key", "core_api_key", "reddit_client_id",
-                         "facebook_access_token", "instagram_access_token", "x_bearer_token", "tiktok_client_key")},
+                         "facebook_access_token", "instagram_access_token", "x_bearer_token", "tiktok_client_key",
+                         "apify_token")},
     }

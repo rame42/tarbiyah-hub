@@ -83,6 +83,7 @@ quality score; low scores are flagged in the library.
 | X (Twitter) | `X_BEARER_TOKEN` | developer.x.com | **Paid** API tiers are required for reading |
 | TikTok | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | TikTok Research API (approved researchers only) | Without it, only oEmbed metadata for video URLs you list |
 | Telegram | none | | Public channels via their public web preview |
+| Apify (any platform) | `APIFY_TOKEN` | https://console.apify.com > Settings > API & Integrations | **Paid per run**; see [APIFY.md](APIFY.md) |
 
 Platforms without credentials show `needs_credentials` on the Sources page and are skipped. Nothing else is affected.
 

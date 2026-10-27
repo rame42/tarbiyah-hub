@@ -45,6 +45,9 @@ class Config(BaseSettings):
     telegram_api_id: str = Field(default="", alias="TELEGRAM_API_ID")
     telegram_api_hash: str = Field(default="", alias="TELEGRAM_API_HASH")
 
+    apify_token: str = Field(default="", alias="APIFY_TOKEN")
+    apify_base_url: str = Field(default="https://api.apify.com", alias="TH_APIFY_BASE_URL")
+
     tesseract_cmd: str = Field(default="", alias="TH_TESSERACT_CMD")
 
     @property

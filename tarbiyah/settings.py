@@ -34,6 +34,11 @@ DEFAULTS: dict[str, Any] = {
     "daily_download_mb_limit": 2000,
     "daily_ai_call_limit": 200,
     "daily_ai_budget_usd": 2.0,
+    # Apify (paid service; applies only when APIFY_TOKEN is set)
+    "apify_daily_run_limit": 5,          # Actor runs per day (each run is billed by Apify)
+    "apify_max_items_per_run": 50,       # results per run (caps cost of pay-per-result Actors)
+    "apify_max_charge_usd_per_run": 0.5, # spending cap per run (pay-per-event Actors)
+    "apify_run_timeout_seconds": 900,
     # storage
     "storage_limit_gb": 20.0,
     "max_file_mb": 150,
@@ -162,6 +167,7 @@ LIMITS = {
     "download_mb": "daily_download_mb_limit",
     "ai_calls": "daily_ai_call_limit",
     "ai_cost_usd": "daily_ai_budget_usd",
+    "apify_runs": "apify_daily_run_limit",
 }
 
 

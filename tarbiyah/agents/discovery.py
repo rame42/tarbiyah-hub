@@ -68,7 +68,10 @@ def enabled_search_sources(session: Session) -> list[Source]:
     out = []
     for s in rows:
         a = ADAPTERS.get(s.adapter)
-        if a and a.supports("search") and (s.config or {}).get("role") == "search" and a.is_configured():
+        if not (a and a.supports("search") and a.is_configured()):
+            continue
+        role = (s.config or {}).get("role")
+        if role == "search" or (role == "monitor" and (s.config or {}).get("use_for_research")):
             out.append(s)
     return out
 

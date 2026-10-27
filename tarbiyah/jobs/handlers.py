@@ -112,6 +112,10 @@ def collect_source(ctx: JobContext) -> dict[str, Any]:
     except NotConfigured as e:
         src.health, src.last_error = "needs_credentials", str(e)
         raise PermanentFailure(str(e)) from e
+    except TimeoutError as e:  # e.g. an Apify run still in progress: poll the same run again later
+        src.health, src.last_error = "running", str(e)
+        s.commit()
+        raise Deferred(str(e), utcnow() + timedelta(minutes=5)) from e
     except Exception as e:
         src.health, src.last_error = "error", f"{type(e).__name__}: {e}"[:2000]
         s.commit()  # keep the health status even though the job fails
@@ -145,7 +149,11 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
     src.last_run_at = utcnow()
     ctx.commit()
     try:
-        items = adapter.search(p["query"], p.get("lang"), int(p.get("limit", 15)))
+        if hasattr(adapter, "search_with"):  # searches that need the source's own configuration (Apify)
+            items = adapter.search_with({**adapter.info.default_config, **(src.config or {})}, p["query"],
+                                        p.get("lang"), int(p.get("limit", 15)), src.key, src.id)
+        else:
+            items = adapter.search(p["query"], p.get("lang"), int(p.get("limit", 15)))
     except NotConfigured as e:
         log_row.status, log_row.error = "not_configured", str(e)
         src.health = "needs_credentials"
