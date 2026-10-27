@@ -15,4 +15,7 @@ def alembic_config() -> AlembicConfig:
 
 
 def upgrade_db() -> None:
+    import logging
+
+    logging.getLogger("alembic").setLevel(logging.WARNING)
     command.upgrade(alembic_config(), "head")

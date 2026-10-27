@@ -54,9 +54,13 @@ from .status import system_status
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from ..runfiles import clear_pid, write_pid
+
     init_app()
+    write_pid("web")
     yield
     flush_usage()
+    clear_pid("web")
 
 
 app = FastAPI(title="Tarbiyah Hub", version="0.1.0", lifespan=lifespan)
@@ -720,7 +724,13 @@ def automation(action: str, s: Session = Depends(get_session)) -> dict[str, Any]
 @app.get("/api/settings")
 def get_settings(s: Session = Depends(get_session)) -> dict[str, Any]:
     vals = get_all(s)
+    def kind(v: Any) -> str:
+        return ("boolean" if isinstance(v, bool) else "integer" if isinstance(v, int) else
+                "decimal" if isinstance(v, float) else "list" if isinstance(v, list) else
+                "object" if isinstance(v, dict) else "string")
+
     return {"values": {k: vals[k] for k in DEFAULTS}, "defaults": DEFAULTS,
+            "types": {k: kind(v) for k, v in DEFAULTS.items()},
             "model": get_config().ai_model, "data_dir": str(get_config().data_dir)}
 
 

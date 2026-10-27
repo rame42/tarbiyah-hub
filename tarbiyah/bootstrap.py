@@ -35,6 +35,10 @@ def seed() -> None:
 
 
 def init_app() -> None:
+    """Safe to call from several processes at once (web + worker start together)."""
+    from .runfiles import InterProcessLock
+
     get_config().ensure_dirs()
-    upgrade_db()
-    seed()
+    with InterProcessLock("init"):
+        upgrade_db()
+        seed()

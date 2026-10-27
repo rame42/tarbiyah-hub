@@ -1,0 +1,17 @@
+# systemd unit (Linux server). Copy to /etc/systemd/system/, edit User and paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tarbiyah-worker tarbiyah-web
+[Unit]
+Description=Tarbiyah Hub background worker
+After=network-online.target
+
+[Service]
+User=tarbiyah
+WorkingDirectory=/opt/tarbiyah-hub
+ExecStart=/opt/tarbiyah-hub/.venv/bin/python -m tarbiyah worker
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target

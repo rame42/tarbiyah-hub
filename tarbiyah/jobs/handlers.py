@@ -116,10 +116,11 @@ def collect_source(ctx: JobContext) -> dict[str, Any]:
         src.health, src.last_error = "error", f"{type(e).__name__}: {e}"[:2000]
         s.commit()  # keep the health status even though the job fails
         raise
-    src.health, src.last_error = "ok", "; ".join(messages)[-2000:] or None
+    src.health, src.last_error = "ok", None
     src.last_success_at = utcnow()
     src.items_collected = (src.items_collected or 0) + created
-    src.last_result = {"seen": seen, "new": created, "updated": updated, "at": utcnow().isoformat()}
+    src.last_result = {"seen": seen, "new": created, "updated": updated, "at": utcnow().isoformat(),
+                       "messages": messages[-10:]}
     ctx.audit("social_media" if adapter.info.kind in ("social", "video") else "discovery", "collect_source",
               f"{src.name}: {seen} seen, {created} new, {updated} updated")
     if ctx.stop_event.is_set():

@@ -1,0 +1,13 @@
+[Unit]
+Description=Tarbiyah Hub dashboard and API
+After=network-online.target
+
+[Service]
+User=tarbiyah
+WorkingDirectory=/opt/tarbiyah-hub
+ExecStart=/opt/tarbiyah-hub/.venv/bin/python -m tarbiyah web --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

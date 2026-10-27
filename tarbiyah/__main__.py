@@ -7,6 +7,7 @@
   status                    print queue / worker / source status
   import PATH [PATH...]     import local files or folders
   search QUERY              keyword search (Arabic or English)
+  stop                      stop the worker gracefully (finishes running jobs) and the web server
   pause | resume            pause or resume all automated work
   cycle                     queue one research cycle now
   drain [--seconds N]       process queued jobs in the foreground until the queue is empty
@@ -32,6 +33,7 @@ def _setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=handlers)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logging.getLogger("alembic").setLevel(logging.WARNING)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     im.add_argument("--type", default="book")
     se = sub.add_parser("search")
     se.add_argument("query")
+    sub.add_parser("stop")
     sub.add_parser("pause")
     sub.add_parser("resume")
     sub.add_parser("cycle")
@@ -91,8 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "run":
         import multiprocessing
 
+        import threading
+
         p = multiprocessing.Process(target=main, args=(["worker"],), daemon=False)
         p.start()
+        threading.Thread(target=p.join, daemon=True).start()  # reap the worker as soon as it exits
         try:
             import uvicorn
 
@@ -132,6 +138,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"#{r['id']} [{r['language']}] {r['title'][:90]}")
             if x["passage"]:
                 print("    " + x["passage"]["text"][:200].replace("\n", " "))
+    elif args.cmd == "stop":
+        import os
+        import signal
+        import time
+
+        from .runfiles import pid_alive, read_pid, request_stop
+
+        wpid = read_pid("worker")
+        if pid_alive(wpid):
+            request_stop("worker")
+            print(f"Worker (pid {wpid}) asked to stop; waiting for running jobs to finish...")
+            for _ in range(180):
+                if not pid_alive(wpid):
+                    break
+                time.sleep(1)
+            print("Worker stopped." if not pid_alive(wpid) else "Worker still finishing a job; it will stop on its own.")
+        else:
+            print("Worker is not running.")
+        web = read_pid("web")
+        if pid_alive(web):
+            os.kill(web, signal.SIGTERM)
+            print(f"Web server (pid {web}) stopped.")
+        else:
+            print("Web server is not running.")
     elif args.cmd in ("pause", "resume"):
         from .settings import set_setting
 

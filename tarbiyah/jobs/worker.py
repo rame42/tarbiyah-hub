@@ -184,6 +184,10 @@ class Worker:
 
     def startup(self) -> None:
         from . import handlers  # noqa: F401  registers job handlers
+        from ..runfiles import clear_stop_request, write_pid
+
+        clear_stop_request("worker")
+        write_pid("worker")
 
         with session_scope() as s:
             n = queue.recover_stale(s, self.worker_id)
@@ -221,7 +225,13 @@ class Worker:
         log.info("worker %s started (concurrency=%d)", self.worker_id, self.concurrency)
         last_status = 0.0
         try:
+            from ..runfiles import stop_requested
+
             while not self.stop_event.is_set():
+                if stop_requested("worker"):
+                    log.info("stop requested (python -m tarbiyah stop): finishing running jobs")
+                    self.stop_event.set()
+                    break
                 try:
                     flush_usage()
                     self.run_once()
@@ -257,4 +267,7 @@ class Worker:
             write_status(self.worker_id, [], self.started_at, "stopped")
         except Exception:  # noqa: BLE001
             pass
+        from ..runfiles import clear_pid
+
+        clear_pid("worker")
         log.info("worker stopped cleanly")
