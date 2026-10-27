@@ -10,3 +10,4 @@ node_modules/
 .pytest_cache/
 backups/
 tests/fixtures/generated/
+tarbiyah-hub.zip
