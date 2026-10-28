@@ -48,6 +48,7 @@ const D = {
   label: ["Label", "وسم"],
   labels: ["Labels", "الوسوم"],
   show_deleted: ["Show deleted items", "عرض العناصر المحذوفة"],
+  last_update_log: ["What happened at the last update", "ما حدث في آخر تحديث"],
   nav_clean: ["Sort & Clean", "الفرز والتنظيف"],
   lib_view: ["Show", "عرض"],
   view_active: ["Library (active items)", "المكتبة (العناصر النشطة)"],

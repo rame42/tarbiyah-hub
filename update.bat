@@ -17,7 +17,14 @@ if "%~1"=="" (
 )
 if errorlevel 1 (
   echo.
-  echo The update did not complete. Nothing was lost. Starting the current version again...
+  echo ===== The update did NOT complete. Nothing was lost. The message above says why. =====
+  echo Starting the current version again...
+) else (
+  echo.
+  echo ===== Update finished. In the browser press Ctrl+F5 once. =====
 )
 echo Starting Tarbiyah Hub...
 call start.bat
+echo.
+echo You can close this window.
+pause

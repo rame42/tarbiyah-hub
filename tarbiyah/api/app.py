@@ -1004,9 +1004,9 @@ def download_output(oid: int, fmt: str = "md", s: Session = Depends(get_session)
 
 @app.get("/api/update")
 def update_status() -> dict[str, Any]:
-    from ..updater import check
+    from ..updater import check, last_update_log
 
-    return check()
+    return {**check(), "last_log": last_update_log()}
 
 
 @app.post("/api/backup")

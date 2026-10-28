@@ -79,17 +79,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return 0 if run() else 1
     if args.cmd == "update":  # replaces program files only; runs before the app is loaded
-        from .updater import check, update
+        from .updater import check, update_logged
 
         if args.check:
             print(json.dumps(check(), indent=2))
             return 0
-        try:
-            update(args.zip)
-        except Exception as e:  # noqa: BLE001 - show a plain message to the user
-            print(f"Update failed: {e}")
-            return 1
-        return 0
+        return 0 if update_logged(args.zip) else 1
     if args.cmd == "restore":  # must run before the database is opened
         from .backup import restore
 

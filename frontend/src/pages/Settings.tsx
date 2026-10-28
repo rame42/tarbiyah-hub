@@ -214,6 +214,7 @@ interface UpdateInfo {
   update_available?: boolean;
   current?: { sha?: string; installed_at?: string; source?: string };
   latest?: { sha: string; date: string | null; message: string };
+  last_log?: string;
 }
 
 function Updates() {
@@ -227,7 +228,7 @@ function Updates() {
         <div className="form-stack small">
           {u.current?.sha ? <p>{t("installed_version")}: <code>{u.current.sha}</code> {u.current.installed_at ? `(${u.current.installed_at})` : null}</p> : null}
           {!u.configured ? <p className="muted" dir="auto">{t("updates_not_configured")}</p> : null}
-          {u.error ? <p className="muted">{u.error}</p> : null}
+          {u.error ? <div className="alert alert-warn" role="status" dir="auto">{u.error}</div> : null}
           {u.configured && u.latest ? (
             u.update_available ? (
               <div className="alert alert-ok" role="status">
@@ -237,6 +238,12 @@ function Updates() {
             ) : <p>{t("up_to_date")}</p>
           ) : null}
           <p className="muted">{t("update_keeps")}</p>
+          {u.last_log ? (
+            <details>
+              <summary>{t("last_update_log")}</summary>
+              <pre className="pre">{u.last_log}</pre>
+            </details>
+          ) : null}
           <div><button type="button" className="btn btn-small" onClick={() => state.reload()}>{t("check_updates")}</button></div>
         </div>
       ) : null}

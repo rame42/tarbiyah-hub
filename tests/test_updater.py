@@ -49,3 +49,26 @@ def test_update_rejects_unrelated_or_unsafe_zips(env, tmp_path, monkeypatch):
         updater.update(str(other), log=lambda m: None)
     assert (root / "tarbiyah" / "__main__.py").read_text() == "old"
     assert updater.check()["configured"] is False  # no TH_UPDATE_REPO: explains how to update by zip
+
+
+def test_update_messages_are_plain_and_env_is_tolerant(env, monkeypatch, tmp_path):
+    from tarbiyah import updater
+
+    envf = tmp_path / ".env"
+    envf.write_text('﻿TH_UPDATE_REPO = "me/repo"\nTH_UPDATE_TOKEN=\n', encoding="utf-8")
+    monkeypatch.setattr(updater, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("TH_UPDATE_REPO", raising=False)
+    monkeypatch.delenv("TH_UPDATE_TOKEN", raising=False)
+    assert updater._repo()[0] == "me/repo"
+
+    class R:
+        status_code, text = 404, '{"message":"Not Found"}'
+
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: R())
+    info = updater.check()
+    assert "private" in info["error"] and "TH_UPDATE_TOKEN" in info["error"]
+    assert updater.update_logged() is False
+    assert "Update failed" in updater.last_update_log() and "private" in updater.last_update_log()
+    R.status_code = 401
+    envf.write_text("TH_UPDATE_REPO=me/repo\nTH_UPDATE_TOKEN=github_pat_x\n", encoding="utf-8")
+    assert "rejected TH_UPDATE_TOKEN" in updater.check()["error"]

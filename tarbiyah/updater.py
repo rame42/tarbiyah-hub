@@ -58,9 +58,10 @@ def _env_value(key: str) -> str:
     env = PROJECT_ROOT / ".env"
     if not env.exists():
         return ""
-    for line in env.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if line.strip().startswith(key + "="):
-            return line.split("=", 1)[1].strip()
+    for line in env.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == key:  # tolerate spaces around '=' and quotes around the value
+            return value.strip().strip("\"'").strip()
     return ""
 
 
@@ -81,10 +82,26 @@ def check() -> dict:
                            "You can still update by dragging a zip file onto update.bat."}
     try:
         r = requests.get(f"https://api.github.com/repos/{repo}/commits/{branch}", headers=_headers(token), timeout=20)
+    except requests.RequestException as e:
+        return {"configured": True, "current": current,
+                "error": f"Could not reach GitHub (check the internet connection): {e}"}
+    if r.status_code in (401, 403, 404):
+        if r.status_code == 401:
+            why = "GitHub rejected TH_UPDATE_TOKEN (wrong, expired or incompletely copied). Create a new token."
+        elif r.status_code == 403 and "rate limit" in r.text.lower():
+            why = "GitHub's hourly limit for requests without a token was reached. Try again in an hour."
+        elif not token:
+            why = (f"GitHub did not find '{repo}'. It is private, so TH_UPDATE_TOKEN is needed in .env "
+                   f"(or the name in TH_UPDATE_REPO is misspelled).")
+        else:
+            why = (f"GitHub did not find '{repo}' with this token. Check the spelling of TH_UPDATE_REPO and that the "
+                   f"token has access to this repository with Contents: Read-only.")
+        return {"configured": True, "current": current, "error": why}
+    try:
         r.raise_for_status()
         latest = r.json()
-    except requests.RequestException as e:
-        return {"configured": True, "current": current, "error": f"Could not reach GitHub: {e}"}
+    except (requests.RequestException, ValueError) as e:
+        return {"configured": True, "current": current, "error": f"GitHub answered with an error: {e}"}
     sha = latest.get("sha", "")
     return {"configured": True, "current": current, "latest": {
         "sha": sha[:12], "date": ((latest.get("commit") or {}).get("committer") or {}).get("date"),
@@ -149,6 +166,36 @@ def apply_zip(zip_path: Path, info: dict | None = None, log=print) -> dict:
     info["installed_at"] = datetime.now().isoformat(timespec="seconds")
     _save_version(info)
     return {"files": copied, **info}
+
+
+def last_update_log() -> str:
+    try:
+        return (_version_path().parent / "last-update.txt").read_text(encoding="utf-8")[-4000:]
+    except OSError:
+        return ""
+
+
+def update_logged(zip_path: str | None = None) -> bool:
+    """Run an update, print what happens and keep it in data/run/last-update.txt (shown in Settings)."""
+    from datetime import datetime
+
+    lines = [f"Update started {datetime.now():%Y-%m-%d %H:%M}"]
+
+    def log(msg: str) -> None:
+        print(msg)
+        lines.append(msg)
+
+    ok = True
+    try:
+        update(zip_path, log=log)
+    except Exception as e:  # noqa: BLE001 - show a plain message to the user
+        log(f"Update failed: {e}")
+        ok = False
+    try:
+        (_version_path().parent / "last-update.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return ok
 
 
 def update(zip_path: str | None = None, log=print) -> dict:
