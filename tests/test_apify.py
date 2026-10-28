@@ -152,3 +152,16 @@ def test_apify_failed_run_and_missing_token(apify, monkeypatch):
 
     reset_config_cache()
     assert not ADAPTERS["apify"].is_configured()
+
+
+def test_apify_keywords_keep_only_matching_posts(apify):
+    with session_scope() as s:
+        src = s.query(Source).filter(Source.key == "apify-tiktok").one()
+        src.config = {**src.config, "keywords": ["تربيه", "اطفال"]}  # spelling variants still match
+    _collect()
+    drain(60)
+    with session_scope() as s:
+        rs = [r.url for r in s.query(Resource).filter(Resource.source_key == "apify-tiktok")]
+        assert rs == ["https://www.tiktok.com/@murabbi/video/7301"]  # the English lecture has none of the words
+        src = s.query(Source).filter(Source.key == "apify-tiktok").one()
+        assert any("skipped" in m for m in src.last_result["messages"])

@@ -57,7 +57,7 @@ def _in_domains(url: str, domains: list[str]) -> bool:
 def _matches_keywords(cfg: dict[str, Any], ex: Any) -> bool:
     """Focus a site on your topics: keep a page only if one of `keywords` appears in its title
     (and description, or the whole text with keywords_in="text"). Arabic spelling variants match."""
-    from ..text.arabic import normalize_for_search
+    from .base import matches_keywords
 
     where = cfg.get("keywords_in") or "title_description"
     parts = [ex.title or ""]
@@ -65,10 +65,7 @@ def _matches_keywords(cfg: dict[str, Any], ex: Any) -> bool:
         parts.append(ex.description or "")
     if where == "text":
         parts.append((ex.full_text or "")[:20000])
-    hay = " " + normalize_for_search(" ".join(parts)) + " "
-    words = cfg.get("keywords")
-    words = [words] if isinstance(words, str) else words
-    return any(normalize_for_search(str(k)).strip() and normalize_for_search(str(k)).strip() in hay for k in words)
+    return matches_keywords(cfg.get("keywords"), *parts)
 
 
 def render_with_playwright(url: str, timeout_ms: int = 30000) -> str:

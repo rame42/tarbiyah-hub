@@ -27,7 +27,7 @@ from ..http import BudgetExceeded, FetchError, http
 from ..ingest.licensing import decide
 from ..ingest.registry import ResourceIn
 from ..settings import get_setting, record_usage
-from .base import AdapterInfo, CollectContext, NotConfigured, SourceAdapter, as_year
+from .base import AdapterInfo, CollectContext, NotConfigured, SourceAdapter, as_year, matches_keywords
 
 FINISHED = {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}
 
@@ -177,6 +177,7 @@ class ApifyAdapter(SourceAdapter):
             "search_input": "Input used for research questions; write {query} where the search text goes",
             "field_map": "Optional: {\"url\": \"path\", \"text\": \"path\", \"author\": \"path\", \"date\": \"path\"}",
             "language": "Language hint (ar / en)",
+            "keywords": "Keep only posts containing one of these words (e.g. your three pillars)",
         },
         default_config={"actor": "", "input": {}, "platform": "", "resource_type": "social_post", "max_items": 30,
                         "use_for_research": False, "search_input": {}, "field_map": {}},
@@ -261,10 +262,17 @@ class ApifyAdapter(SourceAdapter):
             ctx.save_checkpoint({k: v for k, v in ctx.checkpoint.items() if k != "apify_run_id"})
             raise
         ctx.log(f"Apify run returned {len(items)} item(s)")
+        skipped = 0
         for item in items:
             d = item_to_resource(item, cfg, ctx.source_key, ctx.source_id)
-            if d is not None:
-                yield d
+            if d is None:
+                continue
+            if cfg.get("keywords") and not matches_keywords(cfg["keywords"], d.title, d.description, d.text):
+                skipped += 1  # off-topic post: not saved
+                continue
+            yield d
+        if skipped:
+            ctx.log(f"{skipped} post(s) skipped: none of your keywords")
 
     def search_with(self, cfg: dict[str, Any], query: str, lang: str | None, limit: int,
                     source_key: str | None, source_id: int | None) -> list[ResourceIn]:

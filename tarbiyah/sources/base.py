@@ -118,3 +118,17 @@ def as_year(v: Any) -> int | None:
         if 500 <= y <= 2100:
             return y
     return None
+
+
+def matches_keywords(keywords: Any, *texts: str | None) -> bool:
+    """True when one of the keywords appears in the texts (Arabic spelling variants and diacritics ignored).
+    Used to focus a big site or a social account on your topics."""
+    from ..text.arabic import normalize_for_search
+
+    words = [keywords] if isinstance(keywords, str) else list(keywords or [])
+    hay = " " + normalize_for_search(" ".join(t for t in texts if t)) + " "
+    for k in words:
+        k = normalize_for_search(str(k)).strip()
+        if k and k in hay:
+            return True
+    return False
