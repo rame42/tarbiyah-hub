@@ -99,6 +99,7 @@ class WebCrawlerAdapter(SourceAdapter):
             "recrawl_hours": "Revisit fetched pages after N hours", "min_text_chars": "Minimum text to save a page",
             "resource_type": "Type for saved pages", "download_documents": "Permission to store site files",
             "render_js": "Render with Playwright", "language": "Language hint",
+            "only_courses": "Keep only course pages (for course catalogues: true/false)",
         },
         default_config={"start_urls": [], "max_depth": 3, "use_sitemap": True, "recrawl_hours": 168,
                         "min_text_chars": 400, "resource_type": "article", "download_documents": False,
@@ -282,8 +283,13 @@ class WebCrawlerAdapter(SourceAdapter):
                         pass
                 elif self._allowed(href, cfg, domains):
                     self._add(ctx, href, row.depth + 1)
+        from ..ingest.courses import course_access, course_from_html
+
+        course = course_from_html(html_bytes, res.final_url)
+        if cfg.get("only_courses") and not course:
+            return  # course catalogues: keep only the course pages (links are still followed)
         is_start = canonical_url(url) in {canonical_url(u) for u in cfg.get("start_urls") or []}
-        if is_start or not self._is_content(url, cfg) or len(ex.full_text) < min_chars:
+        if not course and (is_start or not self._is_content(url, cfg) or len(ex.full_text) < min_chars):
             return
         if not (first_time or changed):
             return
@@ -307,6 +313,15 @@ class WebCrawlerAdapter(SourceAdapter):
             extra={"crawl_depth": row.depth, "updated_content": changed, "content_hash": new_hash,
                    "inline_method": "trafilatura"},
         )
+        if course:
+            d.resource_type, d.title = "course", course["title"]
+            d.description = course.get("description") or d.description
+            d.publisher = course.get("provider") or d.publisher
+            d.access = course_access(course)
+            if not course.get("free"):
+                d.price, d.currency = course.get("price"), course.get("currency")
+                d.purchase_url = course.get("offer_url") or res.final_url
+            d.extra["course"] = {k: course.get(k) for k in ("provider", "free", "price", "currency")}
         yield d
 
     def _document(self, url: str, cfg: dict[str, Any], ctx: CollectContext, title: str | None,

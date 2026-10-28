@@ -359,6 +359,25 @@ def daily_report_job(ctx: JobContext) -> dict[str, Any]:
     return {"day": day.isoformat(), "finalized": rep.finalized}
 
 
+@handler("triage")
+def triage_job(ctx: JobContext) -> dict[str, Any]:
+    """AI relevance screening of new items, 20 per request (bounded per run and by the daily AI limits)."""
+    from ..agents.triage import triage_batch
+
+    if not claude().available():
+        return {"skipped": "AI not configured"}
+    total = 0
+    for _ in range(int(ctx.payload.get("max_batches", 5))):
+        if ctx.should_stop():
+            break
+        n = triage_batch(ctx.session)["triaged"]
+        ctx.commit()
+        total += n
+        if n == 0:
+            break
+    return {"triaged": total}
+
+
 @handler("curate_all")
 def curate_all_job(ctx: JobContext) -> dict[str, Any]:
     """Re-score and re-sort the library with the current keyword rules (focus/exclude words, glossary).
@@ -387,13 +406,16 @@ def curate_all_job(ctx: JobContext) -> dict[str, Any]:
             s.refresh(r)
             sorted_now += int(not had and bool(r.pillars))
             if (ctx.payload.get("ai") and not r.pillars and r.ai_status != "done" and claude().available()
-                    and queued_ai < int(ctx.payload.get("ai_limit", 100))):
+                    and (r.extra or {}).get("relevance_ai") is not None and queued_ai < int(ctx.payload.get("ai_limit", 100))):
+                # screened by the AI but still without a pillar: let the AI read the whole item
                 queue.enqueue(s, "analyze", {"resource_id": r.id}, priority=60, group="ai", dedupe_key=f"analyze:{r.id}")
                 queued_ai += 1
             done += 1
             last = r.id
         ctx.heartbeat({"last_id": last, "done": done, "sorted": sorted_now, "queued_ai": queued_ai})
         ctx.commit()
+    if ctx.payload.get("ai") and claude().available():
+        queue.enqueue(s, "triage", {"max_batches": 50}, priority=40, group="ai", dedupe_key="triage")
     ctx.audit("coordinator", "curate_all", f"{done} item(s) re-scored, {sorted_now} newly sorted into a pillar, "
                                           f"{queued_ai} sent to AI")
     return {"rescored": done, "newly_sorted": sorted_now, "queued_for_ai": queued_ai}
@@ -407,6 +429,11 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
     active = {(j.job_type, (j.payload or {}).get("resource_id")) for j in
               s.execute(select(Job).where(Job.status.in_(queue.ACTIVE))).scalars()}
     out = {"acquire": 0, "process": 0, "analyze": 0, "citations": 0, "resynthesize": 0, "qa": 0}
+    if claude().available() and get_setting("ai_triage", s):
+        from ..agents.triage import _candidates
+
+        if _candidates(s, 1):
+            queue.enqueue(s, "triage", {"max_batches": 5}, priority=60, group="ai", dedupe_key="triage")
     # items from before relevance scoring existed get scored once, in the background
     if s.execute(select(Resource.id).where(Resource.relevance.is_(None), Resource.deleted.is_(False),
                                            Resource.index_status == "indexed").limit(1)).first():

@@ -19,6 +19,9 @@ interface Summary {
   focus_terms: string[];
   exclude_terms: string[];
   auto_archive_below: number;
+  ai_triage: boolean;
+  research_trusted_only: boolean;
+  ai_screened: number;
   ai_available: boolean;
   job_running: { id: number; checkpoint: Record<string, number> } | null;
 }
@@ -48,6 +51,7 @@ export default function Clean() {
             <Overview d={d} />
             <SortStep d={d} reload={state.reload} />
             <ArchiveStep below={below} setBelow={setBelow} reload={state.reload} />
+            <QualityStep d={d} reload={state.reload} />
             <TeachStep d={d} reload={state.reload} />
             <SourcesStep d={d} reload={state.reload} />
           </>
@@ -225,6 +229,37 @@ function SourcesStep({ d, reload }: { d: Summary; reload: () => void }) {
           </tbody>
         </table>
       </TableWrap>
+    </Card>
+  );
+}
+
+function QualityStep({ d, reload }: { d: Summary; reload: () => void }) {
+  const { t } = useI18n();
+  const set = (body: Record<string, unknown>) => async () => { const r = await api.patch("/api/settings", body); reload(); return r; };
+  const strict = d.ai_triage && d.research_trusted_only && d.auto_archive_below >= 30;
+  return (
+    <Card title={t("quality_title")}>
+      <p className="small">{t("quality_text")}</p>
+      {!d.ai_available ? <p className="alert alert-warn small">{t("quality_no_ai")}</p> : null}
+      <ul className="small quality-list">
+        <li>
+          <strong>{t("quality_triage")}</strong>: {d.ai_triage ? t("on") : t("off")} · {fmtNum(d.ai_screened)} {t("quality_screened")}
+          {" "}<ActionButton className="btn btn-small" onRun={set({ ai_triage: !d.ai_triage })}>{d.ai_triage ? t("turn_off") : t("turn_on")}</ActionButton>
+        </li>
+        <li>
+          <strong>{t("quality_trusted")}</strong>: {d.research_trusted_only ? t("on") : t("off")}
+          {" "}<ActionButton className="btn btn-small" onRun={set({ research_trusted_only: !d.research_trusted_only })}>{d.research_trusted_only ? t("turn_off") : t("turn_on")}</ActionButton>
+        </li>
+        <li><strong>{t("auto_archive_below")}</strong>: {d.auto_archive_below || t("off")}</li>
+      </ul>
+      <div className="toolbar spaced">
+        {strict ? <span className="badge badge-good">{t("quality_strict_on")}</span> : (
+          <ActionButton className="btn btn-primary" onRun={set({ ai_triage: true, research_trusted_only: true, auto_archive_below: 30 })}>
+            {t("quality_strict_btn")}
+          </ActionButton>
+        )}
+        <ActionButton onRun={set({ research_trusted_only: false, auto_archive_below: 15 })}>{t("quality_balanced_btn")}</ActionButton>
+      </div>
     </Card>
   );
 }

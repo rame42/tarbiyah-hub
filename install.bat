@@ -23,6 +23,9 @@ if not exist .env (
 .venv\Scripts\python.exe -m tarbiyah init || goto :fail
 echo.
 echo Installation complete. Double-click start.bat to run Tarbiyah Hub.
+echo.
+echo Moving from an OLDER Tarbiyah Hub folder? Before starting, drag that old folder onto
+echo import-old.bat here: your library, files and keys are copied over (the old folder is not changed).
 pause
 exit /b 0
 :fail

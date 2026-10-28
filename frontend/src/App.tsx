@@ -5,6 +5,8 @@ import Dashboard from "./pages/Dashboard";
 import History from "./pages/History";
 import Library from "./pages/Library";
 import Clean from "./pages/Clean";
+import Courses from "./pages/Courses";
+import Files from "./pages/Files";
 import ResourceDetail from "./pages/ResourceDetail";
 import Research from "./pages/Research";
 import Questions from "./pages/Questions";
@@ -23,6 +25,8 @@ const NAV: [string, TKey][] = [
   ["/history", "nav_history"],
   ["/library", "nav_library"],
   ["/clean", "nav_clean"],
+  ["/files", "nav_files"],
+  ["/courses", "nav_courses"],
   ["/research", "nav_research"],
   ["/questions", "nav_questions"],
   ["/assistant", "nav_assistant"],
@@ -96,6 +100,8 @@ function Shell() {
               <Route path="/history" element={<History />} />
               <Route path="/library" element={<Library />} />
               <Route path="/clean" element={<Clean />} />
+              <Route path="/files" element={<Files />} />
+              <Route path="/courses" element={<Courses />} />
               <Route path="/resources/:id" element={<ResourceDetail />} />
               <Route path="/research" element={<Research />} />
               <Route path="/questions" element={<Questions />} />

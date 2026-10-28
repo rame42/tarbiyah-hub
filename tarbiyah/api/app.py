@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,7 +49,7 @@ from ..models import (
 from ..search.fts import SearchFilters, resource_brief, search
 from ..ai.claude import claude
 from ..settings import DEFAULTS, flush_usage, get_all, set_setting
-from ..sources.registry import ADAPTERS, adapter_status
+from ..sources.registry import ADAPTERS, adapter_status, refresh_credential_health
 from ..storage import absolute
 from ..taxonomy import PILLAR_LABELS
 from .status import system_status
@@ -249,15 +250,176 @@ def get_passage(cid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
             "timestamp": c.timestamp_start, "text": c.text}
 
 
+def _download_name(r: Resource, p: Path) -> str:
+    """A readable file name from the title (Arabic kept), safe for Windows."""
+    import re as _re
+
+    stem = _re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", r.title or "")
+    stem = _re.sub(r"\s+", " ", stem).strip().rstrip(".")[:90].strip() or p.stem
+    return f"{stem}{p.suffix}"
+
+
 @app.get("/api/resources/{rid}/file")
-def resource_file(rid: int, s: Session = Depends(get_session)):
+def resource_file(rid: int, download: bool = False, s: Session = Depends(get_session)):
     r = s.get(Resource, rid)
     if r is None or not r.local_path:
         raise _404("file")
     p = absolute(r.local_path)
     if not p.exists():
         raise _404("file")
-    return FileResponse(p, media_type=r.file_mime or None, filename=p.name)
+    return FileResponse(p, media_type=r.file_mime or None, filename=_download_name(r, p),
+                        content_disposition_type="attachment" if download else "inline")
+
+
+@app.get("/api/files")
+def list_files(q: str = "", type: str | None = None, pillar: str | None = None, view: str = "active",
+               page: int = 1, page_size: int = 50, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..search.fts import pillar_clause, view_clause
+
+    stmt = select(Resource).where(Resource.local_path.is_not(None), Resource.duplicate_of_id.is_(None),
+                                  view_clause(view))
+    if q.strip():
+        stmt = stmt.where(Resource.title.ilike(f"%{q.strip()}%"))
+    if type:
+        stmt = stmt.where(Resource.resource_type == type)
+    if pillar:
+        stmt = stmt.where(pillar_clause(pillar))
+    sub = stmt.subquery()
+    total, size = s.execute(select(func.count(), func.sum(sub.c.file_size)).select_from(sub)).one()
+    rows = s.execute(stmt.order_by(Resource.discovered_at.desc()).offset((max(1, page) - 1) * page_size)
+                     .limit(page_size)).scalars().all()
+    items = []
+    for r in rows:
+        p = absolute(r.local_path)
+        items.append({**resource_brief(r), "file_name": _download_name(r, p), "file_size": r.file_size,
+                      "file_mime": r.file_mime, "ext": p.suffix.lstrip(".").lower(), "exists": p.exists()})
+    return {"total": total or 0, "total_size": int(size or 0), "page": page, "page_size": page_size,
+            "files_folder": str(get_config().files_dir), "items": items}
+
+
+# ============================================================== courses
+
+COURSE_QUERIES = {"ar": ["تربية الأبناء", "تربية الطفل المسلم", "تربية المراهقين", "إعداد المربين", "التربية الإيمانية للأطفال"],
+                  "en": ["Islamic parenting", "raising Muslim children", "Muslim teenagers parenting",
+                         "Islamic teacher training", "Quran teaching children"]}
+
+
+@app.get("/api/courses")
+def list_courses(price: str = "all", q: str = "", pillar: str | None = None, view: str = "active",
+                 page: int = 1, page_size: int = 30, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..search.fts import pillar_clause, view_clause
+
+    stmt = select(Resource).where(Resource.resource_type == "course", Resource.duplicate_of_id.is_(None),
+                                  view_clause(view))
+    if price == "free":
+        stmt = stmt.where(Resource.access_status.in_(("free_to_read", "open_access", "open_license", "public_domain")))
+    elif price == "paid":
+        stmt = stmt.where(Resource.access_status == "paid")
+    if q.strip():
+        stmt = stmt.where(or_(Resource.title.ilike(f"%{q.strip()}%"), Resource.publisher.ilike(f"%{q.strip()}%")))
+    if pillar:
+        stmt = stmt.where(pillar_clause(pillar))
+    total = s.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+    rows = s.execute(stmt.order_by(Resource.relevance.desc().nulls_last(), Resource.discovered_at.desc())
+                     .offset((max(1, page) - 1) * page_size).limit(page_size)).scalars().all()
+    counts = dict(s.execute(select(Resource.access_status, func.count()).where(
+        Resource.resource_type == "course", Resource.duplicate_of_id.is_(None), view_clause("active"))
+        .group_by(Resource.access_status)).all())
+    free_n = sum(n for k, n in counts.items() if k in ("free_to_read", "open_access", "open_license", "public_domain"))
+    return {"total": total, "page": page, "page_size": page_size,
+            "counts": {"all": sum(counts.values()), "free": free_n, "paid": counts.get("paid", 0)},
+            "items": [{**resource_brief(r), "provider": r.publisher, "price": r.price, "currency": r.currency,
+                       "purchase_url": r.purchase_url, "description": (r.description or "")[:300] or None}
+                      for r in rows]}
+
+
+class CourseIn(BaseModel):
+    title: str = ""
+    url: str
+    provider: str | None = None
+    free: bool | None = None
+    price: str | None = None
+    currency: str | None = None
+    description: str | None = None
+    language: str | None = None
+
+
+@app.post("/api/courses")
+def add_course(body: CourseIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.courses import course_access
+    from ..ingest.pipeline import register_with_content
+    from ..ingest.registry import ResourceIn
+
+    if not body.url.lower().startswith(("http://", "https://")):
+        raise HTTPException(400, "Paste the full course link (starting with https://).")
+    free = body.free if body.free is not None else (None if not body.price else False)
+    info = {"free": free, "price": body.price, "currency": body.currency}
+    d = ResourceIn(title=body.title.strip() or body.url, url=body.url, resource_type="course",
+                   description=body.description, language=body.language, publisher=body.provider,
+                   price=None if free else body.price, currency=None if free else body.currency,
+                   purchase_url=None if free else body.url, source_key="manual", collection_method="manual",
+                   access=course_access(info), extra={"fetch_page": True, "course": {**info, "provider": body.provider}})
+    r, created = register_with_content(s, d)
+    if created:
+        queue.enqueue(s, "process", {"resource_id": r.id}, priority=30, group="processing", dedupe_key=f"process:{r.id}")
+    return {"resource_id": r.id, "created": created}
+
+
+class FindCoursesIn(BaseModel):
+    query: str | None = None
+
+
+@app.post("/api/courses/find")
+def find_courses(body: FindCoursesIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    src = s.execute(select(Source).where(Source.adapter == "youtube_courses")).scalars().first()
+    if src is None or not src.enabled:
+        raise HTTPException(400, "The 'YouTube courses' source is disabled. Enable it on the Sources page.")
+    if not get_config().youtube_api_key:
+        raise HTTPException(400, "Finding courses on YouTube needs the free YouTube API key (Settings > Keys & AI).")
+    pairs = [(body.query.strip(), None)] if body.query and body.query.strip() else \
+        [(q, lang) for lang, qs in COURSE_QUERIES.items() for q in qs]
+    jobs = [queue.enqueue(s, "search_source", {"source_id": src.id, "query": q, "lang": lang, "limit": 15},
+                          priority=30, group="youtube", dedupe_key=f"search:{src.id}:{q}").id for q, lang in pairs]
+    return {"queued": len(jobs), "message": f"Searching for courses with {len(jobs)} search(es) in the background."}
+
+
+class ZipIn(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/files/zip")
+def files_zip(body: ZipIn, s: Session = Depends(get_session)):
+    import zipfile
+
+    from starlette.background import BackgroundTask
+
+    entries, total = [], 0
+    for rid in body.ids[:1000]:
+        r = s.get(Resource, rid)
+        if r is None or not r.local_path or r.deleted:
+            continue
+        p = absolute(r.local_path)
+        if p.exists():
+            entries.append((r, p))
+            total += p.stat().st_size
+    if not entries:
+        raise HTTPException(400, "None of the selected items has a downloaded file.")
+    if total > 2 * 1024 ** 3:
+        raise HTTPException(400, f"The selection is {total / 1024 ** 3:.1f} GB; choose at most 2 GB at a time.")
+    tmpdir = Path(tempfile.mkdtemp(prefix="tarbiyah-zip-"))
+    out = tmpdir / "tarbiyah-files.zip"
+    used: set[str] = set()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for r, p in entries:
+            name = _download_name(r, p)
+            base, n = name, 1
+            while name.lower() in used:
+                n += 1
+                name = f"{Path(base).stem} ({n}){p.suffix}"
+            used.add(name.lower())
+            z.write(p, arcname=name)
+    return FileResponse(out, media_type="application/zip", filename=out.name,
+                        background=BackgroundTask(shutil.rmtree, tmpdir, ignore_errors=True))
 
 
 @app.get("/api/resources/{rid}/text", response_class=PlainTextResponse)
@@ -408,6 +570,8 @@ def curation_summary(below: int = 20, s: Session = Depends(get_session)) -> dict
         "sources": sources,
         "focus_terms": settings["focus_terms"], "exclude_terms": settings["exclude_terms"],
         "auto_archive_below": settings["auto_archive_below"],
+        "ai_triage": settings["ai_triage"], "research_trusted_only": settings["research_trusted_only"],
+        "ai_screened": count(view_clause("all"), func.json_extract(Resource.extra, "$.relevance_ai").is_not(None)),
         "ai_available": claude().available(),
         "job_running": {"id": running.id, "checkpoint": running.checkpoint} if running else None,
     }
@@ -913,6 +1077,49 @@ def get_settings(s: Session = Depends(get_session)) -> dict[str, Any]:
     return {"values": {k: vals[k] for k in DEFAULTS}, "defaults": DEFAULTS,
             "types": {k: kind(v) for k, v in DEFAULTS.items()},
             "model": get_config().ai_model, "data_dir": str(get_config().data_dir)}
+
+
+# ============================================================== keys & AI (.env)
+
+def _local_only(request: Request) -> None:
+    """Keys can only be read/changed from the dashboard on this computer (not from other web pages)."""
+    host = (request.headers.get("host") or "").split(":")[0]
+    origin = request.headers.get("origin") or ""
+    if host not in ("127.0.0.1", "localhost", "testserver") or (
+            origin and urlsplit(origin).hostname not in ("127.0.0.1", "localhost")):
+        raise HTTPException(403, "Keys can only be changed from the dashboard on this computer.")
+
+
+@app.get("/api/env")
+def env_get(request: Request) -> dict[str, Any]:
+    from ..envfile import env_path, public_view
+
+    _local_only(request)
+    return {"fields": public_view(), "file": str(env_path()), "provider": claude().name,
+            "ai_configured": claude().configured()}
+
+
+@app.patch("/api/env")
+def env_patch(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    from ..envfile import write_values
+
+    _local_only(request)
+    try:
+        changed = write_values(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    refresh_credential_health()
+    return {"changed": changed, "provider": claude().name, "ai_configured": claude().configured()}
+
+
+@app.post("/api/env/test-ai")
+def env_test_ai(request: Request) -> dict[str, Any]:
+    from ..aitest import run
+
+    _local_only(request)
+    lines: list[str] = []
+    ok = run(out=lines.append)
+    return {"ok": ok, "output": "\n".join(lines)}
 
 
 @app.patch("/api/settings")

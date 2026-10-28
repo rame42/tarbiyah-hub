@@ -157,3 +157,14 @@ class QAVerdict(BaseModel):
 
 class QAReview(BaseModel):
     verdicts: list[QAVerdict]
+
+
+class TriageItem(BaseModel):
+    id: int
+    relevance: int = Field(description="0-100, see the scale in the instructions")
+    pillars: list[Pillar]
+    reason: str = Field(description="One short sentence")
+
+
+class TriageBatch(BaseModel):
+    items: list[TriageItem]

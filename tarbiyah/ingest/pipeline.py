@@ -225,6 +225,12 @@ def _load_extract(session: Session, r: Resource, claude_ocr: OcrFn | None) -> Ex
         if "html" not in fr.content_type:
             return None
         res = extract_html(fr.content, r.url)
+        if r.resource_type in ("article", "web_page", "course", "institution_page", "other"):
+            from .courses import apply_course, course_from_html
+
+            info = course_from_html(fr.content, r.url)
+            if info:
+                apply_course(r, info)
         return finalize(res)
     if r.description and len(r.description) >= 120:
         # Abstract / description published by the source: indexed as passages so it can be cited,

@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { api, Status } from "../api";
 import { ActionButton, Async, BoolBadge, Card, ErrorBox, KV, TableWrap, useAsync } from "../components";
 import { TKey, useI18n } from "../i18n";
+import { SETTING_LABELS } from "./settingLabels";
 
 type Values = Record<string, unknown>;
 interface SettingsResponse { values: Values; defaults: Values; model: string; data_dir: string }
@@ -36,6 +37,7 @@ export default function Settings() {
   return (
     <div className="page">
       <div className="page-head"><h1>{t("settings_title")}</h1></div>
+      <KeysCard />
       <Async state={state}>{(d) => <SettingsForm d={d} onSaved={state.reload} />}</Async>
       <div className="grid-2">
         <Card title={t("credentials")}>
@@ -62,7 +64,7 @@ export default function Settings() {
 }
 
 function SettingsForm({ d, onSaved }: { d: SettingsResponse; onSaved: () => void }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [vals, setVals] = useState<Values>(d.values);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -155,7 +157,7 @@ function SettingsForm({ d, onSaved }: { d: SettingsResponse; onSaved: () => void
     return (
       <div className={`set-row ${isChanged ? "set-changed" : ""}`} key={k}>
         <label htmlFor={`set-${k}`} className="set-label">
-          <code>{k}</code>
+          <strong>{SETTING_LABELS[k] ? SETTING_LABELS[k][lang === "ar" ? 1 : 0] : label(k)}</strong> <code className="small muted">{k}</code>
           <span className="muted small"> {t("default_value")}: {typeof def === "object" ? JSON.stringify(def) : String(def)}</span>
         </label>
         <div className="set-input">{input}</div>
@@ -247,6 +249,84 @@ function Updates() {
           <div><button type="button" className="btn btn-small" onClick={() => state.reload()}>{t("check_updates")}</button></div>
         </div>
       ) : null}
+    </Card>
+  );
+}
+
+interface EnvField { key: string; group: string; label: string; help?: string | null; choices?: string[] | null;
+  secret: boolean; is_set: boolean; value: string }
+interface EnvResponse { fields: EnvField[]; file: string; provider: string; ai_configured: boolean }
+
+const ENV_GROUPS: [string, TKey][] = [["ai", "keys_ai"], ["collect", "keys_collect"], ["social", "keys_social"], ["other", "keys_other"]];
+
+function KeysCard() {
+  const { t } = useI18n();
+  const state = useAsync(() => api.get<EnvResponse>("/api/env"), []);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [test, setTest] = useState<{ ok: boolean; output: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<Record<string, boolean>>({ ai: true });
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.patch<{ changed: string[]; provider: string; ai_configured: boolean }>("/api/env", draft);
+      setDraft({});
+      setMsg({ ok: true, text: `${t("keys_saved")} (${r.changed.length})` });
+      state.reload();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally { setBusy(false); }
+  };
+  const runTest = async () => {
+    setBusy(true); setTest(null);
+    try { setTest(await api.post<{ ok: boolean; output: string }>("/api/env/test-ai")); }
+    catch (e) { setTest({ ok: false, output: (e as Error).message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card title={t("keys_title")}>
+      <p className="small muted">{t("keys_intro")}</p>
+      <Async state={state}>
+        {(d) => (
+          <>
+            <p className="small">{t("ai_now")}: <strong>{d.provider}</strong> · <BoolBadge value={d.ai_configured} yes={t("configured")} no={t("not_configured")} /></p>
+            {ENV_GROUPS.map(([g, title]) => (
+              <details key={g} open={!!open[g]} onToggle={(e) => setOpen((o) => ({ ...o, [g]: (e.target as HTMLDetailsElement).open }))}>
+                <summary><strong>{t(title)}</strong></summary>
+                <div className="form-grid keys-grid">
+                  {d.fields.filter((f) => f.group === g).map((f) => (
+                    <label key={f.key} title={f.key}>
+                      <span>{f.label} {f.secret && f.is_set ? <span className="badge badge-good">{t("key_saved")} {f.value}</span> : null}</span>
+                      {f.choices ? (
+                        <select value={draft[f.key] ?? f.value} onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}>
+                          {!f.value ? <option value="">—</option> : null}
+                          {f.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <input type={f.secret ? "password" : "text"} dir="ltr" autoComplete="off" spellCheck={false}
+                          placeholder={f.secret ? (f.is_set ? t("key_keep") : t("key_paste")) : ""}
+                          value={draft[f.key] ?? (f.secret ? "" : f.value)}
+                          onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })} />
+                      )}
+                      {f.help ? <span className="small muted">{f.help}</span> : null}
+                    </label>
+                  ))}
+                </div>
+              </details>
+            ))}
+            <div className="toolbar spaced">
+              <button type="button" className="btn btn-primary" disabled={busy || !Object.keys(draft).length} onClick={save}>{t("save")}</button>
+              <button type="button" className="btn" disabled={busy} onClick={runTest}>{t("test_ai")}</button>
+              {msg ? <span className={msg.ok ? "small" : "small text-error"} role="status">{msg.text}</span> : null}
+            </div>
+            {test ? <pre className={`pre ${test.ok ? "" : "pre-error"}`}>{test.output}</pre> : null}
+            <p className="small muted">{t("keys_file")}: <code dir="ltr">{d.file}</code></p>
+          </>
+        )}
+      </Async>
     </Card>
   );
 }

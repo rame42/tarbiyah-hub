@@ -16,6 +16,7 @@
   update [--zip FILE]       update the program in place (keeps data/, .env, settings)
   backup [--dest DIR]       consistent backup of the database and files
   restore ARCHIVE           restore a backup archive (stop web/worker first)
+  import-old FOLDER         bring the library, files and keys of an older Tarbiyah Hub folder into this one
 """
 from __future__ import annotations
 
@@ -71,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--check", action="store_true")
     rs = sub.add_parser("restore")
     rs.add_argument("archive")
+    io = sub.add_parser("import-old")
+    io.add_argument("folder")
     args = ap.parse_args(argv)
 
     _setup_logging()
@@ -85,6 +88,20 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(check(), indent=2))
             return 0
         return 0 if update_logged(args.zip) else 1
+    if args.cmd == "import-old":  # must run before the database is opened
+        from .import_old import import_old
+
+        try:
+            import_old(args.folder)
+        except (ValueError, RuntimeError, OSError) as e:
+            print(f"Import failed: {e}")
+            print("Nothing was changed in the old folder.")
+            return 1
+        from .bootstrap import init_app
+
+        init_app()  # upgrades the copied database to this version
+        print("The library is ready. Double-click start.bat.")
+        return 0
     if args.cmd == "restore":  # must run before the database is opened
         from .backup import restore
 

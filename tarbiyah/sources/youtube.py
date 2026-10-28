@@ -18,7 +18,7 @@ import feedparser
 
 from ..config import get_config
 from ..http import FetchError, http
-from ..ingest.licensing import decide
+from ..ingest.licensing import AccessDecision, decide
 from ..ingest.registry import ResourceIn
 from .base import AdapterInfo, CollectContext, SourceAdapter, as_year
 
@@ -333,3 +333,48 @@ class YouTubeAdapter(SourceAdapter):
                                      cfg.get("language"))
                 seen.add(vid)
         ctx.state["seen_ids"] = list(seen)[-20000:]
+
+
+class YouTubeCoursesAdapter(YouTubeAdapter):
+    """Free courses on YouTube: lecture series published as playlists (e.g. "دورة تربية الأبناء").
+    Catalogued as courses with their playlist link; videos are not downloaded."""
+
+    info = AdapterInfo(
+        name="youtube_courses", label="YouTube courses (playlists)", kind="video",
+        description="Free courses and lecture series published as YouTube playlists, found by topic.",
+        capabilities=("search",), resource_types=("course",),
+        optional_credentials=("YOUTUBE_API_KEY",),
+        access_notes="Needs the free YOUTUBE_API_KEY. A search costs 100 of the 10,000 daily quota units.",
+        default_schedule_minutes=1440, min_interval_seconds=1.0,
+    )
+
+    def search(self, query: str, lang: str | None, limit: int) -> list[ResourceIn]:
+        if not get_config().youtube_api_key:
+            from .base import NotConfigured
+
+            raise NotConfigured("Finding YouTube courses needs a free YOUTUBE_API_KEY (Settings > Keys & AI).")
+        word = "دورة" if lang == "ar" or re.search(r"[؀-ۿ]", query) else "course"
+        q = query if word in query.lower() else f"{query} {word}"
+        params: dict[str, Any] = {"part": "snippet", "q": q, "type": "playlist", "maxResults": min(limit, 25)}
+        if lang in ("ar", "en"):
+            params["relevanceLanguage"] = lang
+        data = self._api("search", **params)
+        out = []
+        for it in data.get("items", []):
+            pid = (it.get("id") or {}).get("playlistId")
+            sn = it.get("snippet") or {}
+            if not pid:
+                continue
+            out.append(ResourceIn(
+                title=sn.get("title") or pid, resource_type="course",
+                url=f"https://www.youtube.com/playlist?list={pid}",
+                description=sn.get("description") or None, language=lang,
+                published_date=(sn.get("publishedAt") or "")[:10] or None, year=as_year(sn.get("publishedAt")),
+                publisher=sn.get("channelTitle"), external_id=pid, source_key="youtube_courses",
+                collection_method="youtube_api",
+                access=AccessDecision("free_to_read", False, "Free course: a public YouTube playlist."),
+                channel=sn.get("channelTitle"), text=sn.get("description") or None,
+                extra={"platform": "youtube", "playlist_id": pid,
+                       "course": {"provider": sn.get("channelTitle"), "free": True}},
+            ))
+        return out

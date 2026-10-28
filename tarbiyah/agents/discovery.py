@@ -63,12 +63,20 @@ def recently_searched(session: Session, adapter: str, query: str) -> bool:
         SearchLog.executed_at >= utcnow() - timedelta(days=days))).first() is not None
 
 
+TRUSTED_KINDS = ("academic", "books", "catalog")
+
+
 def enabled_search_sources(session: Session) -> list[Source]:
+    from ..settings import get_setting
+
+    trusted_only = bool(get_setting("research_trusted_only", session))
     rows = session.execute(select(Source).where(Source.enabled.is_(True))).scalars().all()
     out = []
     for s in rows:
         a = ADAPTERS.get(s.adapter)
         if not (a and a.supports("search") and a.is_configured()):
+            continue
+        if trusted_only and a.info.kind not in TRUSTED_KINDS:
             continue
         role = (s.config or {}).get("role")
         if role == "search" or (role == "monitor" and (s.config or {}).get("use_for_research")):

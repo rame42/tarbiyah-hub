@@ -12,11 +12,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"  # the settings file people edit (or the dashboard edits for them)
 
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(PROJECT_ROOT / ".env"), env_file_encoding="utf-8", extra="ignore"
+        env_file=str(PROJECT_ROOT / ".env"), env_file_encoding="utf-8-sig", extra="ignore"
     )
 
     data_dir: Path = Field(default=PROJECT_ROOT / "data", alias="TH_DATA_DIR")
@@ -86,7 +87,9 @@ class Config(BaseSettings):
 
 @lru_cache
 def get_config() -> Config:
-    cfg = Config()
+    import sys
+
+    cfg = Config(_env_file=sys.modules[__name__].ENV_FILE)
     cfg.data_dir = Path(cfg.data_dir).resolve()
     cfg.ensure_dirs()
     return cfg

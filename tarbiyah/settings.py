@@ -58,6 +58,8 @@ DEFAULTS: dict[str, Any] = {
     "focus_terms": [],                   # extra words/phrases that make an item MORE relevant (Arabic or English)
     "exclude_terms": [],                 # words/phrases in a title or description that make an item irrelevant
     "auto_archive_below": 0,             # new automatically collected items scoring below this are archived (0 = off)
+    "ai_triage": True,                   # the AI screens new items for relevance (20 per request)
+    "research_trusted_only": False,      # research searches only scholarly and book sources
     # ui
     "ui_language": "en",
 }

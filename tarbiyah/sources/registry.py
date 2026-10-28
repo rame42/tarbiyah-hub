@@ -23,7 +23,7 @@ from .feeds import RssAdapter
 from .social import FacebookAdapter, InstagramAdapter, RedditAdapter, TelegramAdapter, TikTokAdapter, XAdapter
 from .web import WebCrawlerAdapter
 from .apify import ApifyAdapter
-from .youtube import YouTubeAdapter
+from .youtube import YouTubeAdapter, YouTubeCoursesAdapter
 
 
 class LocalFolderAdapter(SourceAdapter):
@@ -51,7 +51,7 @@ class LocalFolderAdapter(SourceAdapter):
 ADAPTERS: dict[str, SourceAdapter] = {a.info.name: a for a in [
     OpenAlexAdapter(), CrossrefAdapter(), DoajAdapter(), EricAdapter(), CoreAdapter(),
     InternetArchiveAdapter(), OpenLibraryAdapter(), GutendexAdapter(), GoogleBooksAdapter(),
-    WebCrawlerAdapter(), RssAdapter(), YouTubeAdapter(), TelegramAdapter(), RedditAdapter(),
+    WebCrawlerAdapter(), RssAdapter(), YouTubeAdapter(), YouTubeCoursesAdapter(), TelegramAdapter(), RedditAdapter(),
     FacebookAdapter(), InstagramAdapter(), XAdapter(), TikTokAdapter(), LocalFolderAdapter(), ApifyAdapter(),
 ]}
 

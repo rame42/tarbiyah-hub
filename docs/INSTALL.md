@@ -55,6 +55,17 @@ library, sources, questions, settings and keys stay exactly as they are.
 
 Never delete the folder and extract a new copy: that would delete `data\` too.
 
+## 3c. Moving to a new folder (keeps everything)
+
+Installing a fresh copy in a new folder starts with an empty library. To bring your old library
+over (items, downloaded files, labels, archive, reports, keys and settings):
+
+1. Run `stop.bat` in the **old** folder.
+2. In the **new** folder run `install.bat` once.
+3. Drag the **old** folder onto `import-old.bat` in the new folder (or double-click it and paste the
+   old folder's path). It copies the old `data` folder and `.env`; the old folder is not changed.
+4. Start with `start.bat` in the new folder. Delete the old folder only after checking the library.
+
 ## 4. Run automatically
 
 **Windows (at login, restarts if it crashes):** right-click `scripts\install-autostart-windows.ps1` >

@@ -41,3 +41,22 @@ After changing words, click **Re-score the whole library**.
 
 **Step 4** lists each source with the share of relevant items it brings; disable or narrow noisy ones.
 The daily report shows how many new items were archived as not relevant.
+
+## Quality: only relevant, good information
+Sort & Clean → **Quality**:
+- **AI screening** (on by default when an AI key is set): every new item's title, description and source
+  are judged by the AI in batches of 20 (one request per batch). Its score replaces the keyword score.
+- **Trusted sources only**: the research agent searches scholarly databases and book catalogues only
+  (OpenAlex, Crossref, DOAJ, ERIC, CORE, Internet Archive, Open Library, Gutenberg, Google Books),
+  not social media or the open web. Sources you add yourself (channels, websites, courses) keep working.
+- **Strict quality** turns both on and auto-archives new items below 30.
+
+A stronger AI model judges better: Claude (claude-opus-5-5) is strongest; with Gemini, gemini-2.5-pro
+is stronger than gemini-2.5-flash but has a smaller free quota. Change it in Settings → Keys & AI.
+
+## Files and courses
+- **Files**: every downloaded file in one place, with Download buttons and a zip download of a selection.
+- **Courses**: free and paid courses. Paid ones show price and provider link. Sources of courses:
+  added by hand (the page is read for title, provider and price), YouTube playlists (Search now, needs the
+  YouTube key), and course websites: add a Web crawler source with `"only_courses": true`; pages that
+  publish schema.org Course data are recognised with their price.

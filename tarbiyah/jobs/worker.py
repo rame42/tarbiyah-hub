@@ -233,6 +233,13 @@ class Worker:
                     self.stop_event.set()
                     break
                 try:
+                    from ..envfile import reload_if_changed
+
+                    if reload_if_changed():  # keys/AI changed in the dashboard or in Notepad
+                        log.info(".env changed: using the new keys and AI settings")
+                        from ..sources.registry import refresh_credential_health
+
+                        refresh_credential_health()
                     flush_usage()
                     self.run_once()
                 except Exception:  # noqa: BLE001 - e.g. database briefly locked; keep running
