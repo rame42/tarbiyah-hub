@@ -124,6 +124,8 @@ class Resource(Base):
     keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)  # the user's own labels
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)  # hidden; kept so it is not re-collected
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)  # put aside: kept, but out of the way
+    relevance: Mapped[int | None] = mapped_column(Integer, index=True)  # 0-100, how related to tarbiyah
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     discovered_by_question_id: Mapped[int | None] = mapped_column(Integer)
     discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

@@ -4,6 +4,7 @@ import { I18n, I18nContext, Lang, TKey, applyDocumentLang, loadLang, storeLang, 
 import Dashboard from "./pages/Dashboard";
 import History from "./pages/History";
 import Library from "./pages/Library";
+import Clean from "./pages/Clean";
 import ResourceDetail from "./pages/ResourceDetail";
 import Research from "./pages/Research";
 import Questions from "./pages/Questions";
@@ -21,6 +22,7 @@ const NAV: [string, TKey][] = [
   ["/", "nav_dashboard"],
   ["/history", "nav_history"],
   ["/library", "nav_library"],
+  ["/clean", "nav_clean"],
   ["/research", "nav_research"],
   ["/questions", "nav_questions"],
   ["/assistant", "nav_assistant"],
@@ -93,6 +95,7 @@ function Shell() {
               <Route path="/day/:day" element={<Dashboard />} />
               <Route path="/history" element={<History />} />
               <Route path="/library" element={<Library />} />
+              <Route path="/clean" element={<Clean />} />
               <Route path="/resources/:id" element={<ResourceDetail />} />
               <Route path="/research" element={<Research />} />
               <Route path="/questions" element={<Questions />} />

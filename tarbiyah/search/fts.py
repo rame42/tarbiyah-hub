@@ -196,13 +196,37 @@ class SearchFilters:
     discovered_from: str | None = None  # ISO date
     discovered_to: str | None = None
     label: str | None = None
+    view: str = "active"  # active | archived | deleted
+    min_relevance: int | None = None
+    max_relevance: int | None = None
+
+
+def view_clause(view: str | None):
+    """SQL condition for the library views: active items, archived items, or deleted items."""
+    if view == "deleted":
+        return Resource.deleted.is_(True)
+    if view == "archived":
+        return Resource.deleted.is_(False) & Resource.archived.is_(True)
+    if view == "all":
+        return Resource.deleted.is_(False)
+    return Resource.deleted.is_(False) & Resource.archived.is_(False)
+
+
+def pillar_clause(pillar: str):
+    has = select(ResourcePillar.resource_id)
+    if pillar in ("none", "unclassified"):
+        return Resource.id.not_in(has)
+    return Resource.id.in_(has.where(ResourcePillar.pillar == pillar))
 
 
 def _filter_ids(session: Session, ids: list[int], f: SearchFilters) -> list[int]:
     if not ids:
         return ids
-    stmt = select(Resource.id).where(Resource.id.in_(ids), Resource.duplicate_of_id.is_(None),
-                                     Resource.deleted.is_(False))
+    stmt = select(Resource.id).where(Resource.id.in_(ids), Resource.duplicate_of_id.is_(None), view_clause(f.view))
+    if f.min_relevance is not None:
+        stmt = stmt.where(Resource.relevance >= f.min_relevance)
+    if f.max_relevance is not None:
+        stmt = stmt.where(Resource.relevance <= f.max_relevance)
     if f.language:
         stmt = stmt.where(Resource.language == f.language)
     if f.resource_type:
@@ -222,7 +246,7 @@ def _filter_ids(session: Session, ids: list[int], f: SearchFilters) -> list[int]
     if f.label:
         stmt = stmt.where(Resource.labels.cast(String).like(f'%{json.dumps(f.label)[1:-1]}%'))
     if f.pillar:
-        stmt = stmt.where(Resource.id.in_(select(ResourcePillar.resource_id).where(ResourcePillar.pillar == f.pillar)))
+        stmt = stmt.where(pillar_clause(f.pillar))
     if f.topic_id:
         stmt = stmt.where(Resource.id.in_(select(ResourceTopic.resource_id).where(ResourceTopic.topic_id == f.topic_id)))
     allowed = set(session.execute(stmt).scalars().all())
@@ -322,7 +346,7 @@ def search_chunks(session: Session, query: str, limit: int = 12, resource_ids: l
         rows = session.connection().execute(
             text("SELECT c.id, bm25(chunk_fts) FROM chunk_fts JOIN chunks c ON c.id = chunk_fts.rowid "
                  "JOIN resources r ON r.id = c.resource_id "
-                 "WHERE chunk_fts MATCH :m AND r.duplicate_of_id IS NULL AND r.deleted = 0 ORDER BY 2 LIMIT :lim"),
+                 "WHERE chunk_fts MATCH :m AND r.duplicate_of_id IS NULL AND r.deleted = 0 AND r.archived = 0 ORDER BY 2 LIMIT :lim"),
             {"m": pq.match, "lim": limit * 4},
         ).all()
         ranked = [cid for cid, _ in rows]
@@ -343,7 +367,7 @@ def search_chunks(session: Session, query: str, limit: int = 12, resource_ids: l
         if c is None:
             continue
         r = session.get(Resource, c.resource_id)
-        if r is None or r.duplicate_of_id is not None or r.deleted:
+        if r is None or r.duplicate_of_id is not None or r.deleted or r.archived:
             continue
         if resource_ids and c.resource_id not in resource_ids:
             continue
@@ -375,4 +399,6 @@ def resource_brief(r: Resource) -> dict[str, Any]:
         "discovered_at": r.discovered_at.isoformat() if r.discovered_at else None,
         "has_file": bool(r.local_path),
         "labels": r.labels or [],
+        "relevance": r.relevance,
+        "archived": bool(r.archived),
     }

@@ -1205,3 +1205,11 @@ q.quote {
 .check-row .check { flex-direction: row; }
 .text-error { color: var(--danger); }
 .form-grid label.check { flex-direction: row; align-items: center; align-self: end; }
+.stat-link { color: inherit; text-decoration: none; }
+.stat-link .stat:hover { border-color: var(--accent); }
+a.bar-row { color: inherit; text-decoration: none; }
+.bar-fill.good { background: var(--good); }
+.bar-fill.warn { background: var(--warn); }
+.bar-fill.bad { background: var(--danger); }
+.inline-field { display: flex; align-items: center; gap: 0.4rem; }
+.inline-field input { inline-size: 5rem; }

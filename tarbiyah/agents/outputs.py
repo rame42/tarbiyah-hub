@@ -64,7 +64,8 @@ def _resources(session: Session, o: Output) -> list[Resource]:
     if p.get("query"):
         res = search(session, p["query"], SearchFilters(pillar=p.get("pillar"), language=p.get("language")), limit=60)
         return [session.get(Resource, x["resource"]["id"]) for x in res["results"]]
-    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None), Resource.deleted.is_(False))
+    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None), Resource.deleted.is_(False),
+                                     Resource.archived.is_(False))
     if p.get("pillar"):
         stmt = stmt.where(Resource.id.in_(select(ResourcePillar.resource_id).where(ResourcePillar.pillar == p["pillar"])))
     return session.execute(stmt.order_by(Resource.discovered_at.desc()).limit(60)).scalars().all()

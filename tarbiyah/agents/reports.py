@@ -40,8 +40,10 @@ def compute_stats(session: Session, day: date) -> dict[str, Any]:
     a, b = _bounds(day)
     in_day = lambda col: (col >= a) & (col < b)  # noqa: E731
     new = session.execute(select(Resource).where(in_day(Resource.discovered_at), Resource.duplicate_of_id.is_(None),
-                                 Resource.deleted.is_(False))
+                                 Resource.deleted.is_(False), Resource.archived.is_(False))
                           .order_by(Resource.discovered_at.desc())).scalars().all()
+    auto_archived = session.execute(select(func.count()).select_from(Resource).where(
+        in_day(Resource.discovered_at), Resource.archived.is_(True), Resource.deleted.is_(False))).scalar()
     by_type = Counter(r.resource_type for r in new)
     by_lang = Counter(r.language or "und" for r in new)
     by_source = Counter(r.source_key or "?" for r in new)
@@ -97,6 +99,7 @@ def compute_stats(session: Session, day: date) -> dict[str, Any]:
         "discoveries": {
             "total": len(new), "by_type": dict(by_type), "by_language": dict(by_lang), "by_source": dict(by_source),
             "by_access": dict(by_access), "paid_catalogued": by_access.get("paid", 0),
+            "archived_as_not_relevant": auto_archived,
             "entities": dict(ent_types),
             "institutions": [{"id": e.id, "name": e.name} for e in entities if e.entity_type == "organization"][:15],
             "experts": [{"id": e.id, "name": e.name} for e in entities if e.entity_type == "person"][:15],

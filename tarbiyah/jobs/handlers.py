@@ -359,6 +359,46 @@ def daily_report_job(ctx: JobContext) -> dict[str, Any]:
     return {"day": day.isoformat(), "finalized": rep.finalized}
 
 
+@handler("curate_all")
+def curate_all_job(ctx: JobContext) -> dict[str, Any]:
+    """Re-score and re-sort the library with the current keyword rules (focus/exclude words, glossary).
+    scope: 'all' | 'unclassified' | 'unscored'. ai=true also queues AI analysis for items still unclassified."""
+    from ..ingest.manage import reclassify
+    from ..search.fts import pillar_clause
+
+    s = ctx.session
+    scope = ctx.payload.get("scope", "all")
+    last = int(ctx.checkpoint.get("last_id", 0))
+    done, sorted_now, queued_ai = (int(ctx.checkpoint.get(k, 0)) for k in ("done", "sorted", "queued_ai"))
+    while not ctx.should_stop():
+        stmt = select(Resource).where(Resource.id > last, Resource.deleted.is_(False),
+                                      Resource.duplicate_of_id.is_(None))
+        if scope == "unclassified":
+            stmt = stmt.where(pillar_clause("none"))
+        elif scope == "unscored":
+            stmt = stmt.where(Resource.relevance.is_(None))
+        batch = s.execute(stmt.order_by(Resource.id).limit(50)).scalars().all()
+        if not batch:
+            break
+        for r in batch:
+            had = bool(r.pillars)
+            reclassify(s, r)
+            s.flush()
+            s.refresh(r)
+            sorted_now += int(not had and bool(r.pillars))
+            if (ctx.payload.get("ai") and not r.pillars and r.ai_status != "done" and claude().available()
+                    and queued_ai < int(ctx.payload.get("ai_limit", 100))):
+                queue.enqueue(s, "analyze", {"resource_id": r.id}, priority=60, group="ai", dedupe_key=f"analyze:{r.id}")
+                queued_ai += 1
+            done += 1
+            last = r.id
+        ctx.heartbeat({"last_id": last, "done": done, "sorted": sorted_now, "queued_ai": queued_ai})
+        ctx.commit()
+    ctx.audit("coordinator", "curate_all", f"{done} item(s) re-scored, {sorted_now} newly sorted into a pillar, "
+                                          f"{queued_ai} sent to AI")
+    return {"rescored": done, "newly_sorted": sorted_now, "queued_for_ai": queued_ai}
+
+
 @handler("maintenance")
 def maintenance_job(ctx: JobContext) -> dict[str, Any]:
     """Sweep for work that has no active job (e.g. after a crash or a newly added API key)."""
@@ -367,6 +407,11 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
     active = {(j.job_type, (j.payload or {}).get("resource_id")) for j in
               s.execute(select(Job).where(Job.status.in_(queue.ACTIVE))).scalars()}
     out = {"acquire": 0, "process": 0, "analyze": 0, "citations": 0, "resynthesize": 0, "qa": 0}
+    # items from before relevance scoring existed get scored once, in the background
+    if s.execute(select(Resource.id).where(Resource.relevance.is_(None), Resource.deleted.is_(False),
+                                           Resource.index_status == "indexed").limit(1)).first():
+        queue.enqueue(s, "curate_all", {"scope": "unscored"}, priority=75, group="processing",
+                      dedupe_key="curate_all:unscored")
     for r in s.execute(select(Resource).where(Resource.acquisition_status == "pending").limit(200)).scalars():
         if ("acquire", r.id) not in active:
             queue.enqueue(s, "acquire", {"resource_id": r.id}, group="acquisition", dedupe_key=f"acquire:{r.id}")

@@ -54,6 +54,10 @@ DEFAULTS: dict[str, Any] = {
     "crawler_default_max_pages": 200,
     "crawler_default_max_depth": 3,
     "respect_robots_txt": True,
+    # relevance and clean-up
+    "focus_terms": [],                   # extra words/phrases that make an item MORE relevant (Arabic or English)
+    "exclude_terms": [],                 # words/phrases in a title or description that make an item irrelevant
+    "auto_archive_below": 0,             # new automatically collected items scoring below this are archived (0 = off)
     # ui
     "ui_language": "en",
 }

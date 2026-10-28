@@ -2,7 +2,7 @@ import { ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs } from "../api";
 import {
-  ActionButton, Async, Badge, BoolBadge, Card, ErrorBox, fmtDate, fmtNum, fmtTimestamp, KV, Loading, PillarBadge, Pre, TableWrap, useAsync, videoUrlAt, WatchButton
+  ActionButton, Async, Badge, RelevanceBadge, BoolBadge, Card, ErrorBox, fmtDate, fmtNum, fmtTimestamp, KV, Loading, PillarBadge, Pre, TableWrap, useAsync, videoUrlAt, WatchButton
 } from "../components";
 import { useI18n } from "../i18n";
 import { ACCESS_VALUES, RESOURCE_TYPES } from "./Library";
@@ -61,6 +61,8 @@ interface ResourceFull {
   pillars: { pillar: string; score: number; method: string }[];
   labels?: string[] | null;
   deleted?: boolean;
+  archived?: boolean;
+  relevance?: number | null;
   extra?: Record<string, unknown> | null;
   topics: { id: number; name_en: string; name_ar: string; score: number; method: string }[];
   entities: { id: number; type: string; name: string; role: string | null }[];
@@ -116,6 +118,7 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
         {r.language ? <span className="badge badge-neutral">{r.language}</span> : null}
         <Badge value={r.access_status} />
         {r.pillars.map((p) => <PillarBadge key={p.pillar} pillar={p.pillar} />)}
+        <RelevanceBadge value={r.relevance} />
         {r.duplicate_of_id ? <Link to={`/resources/${r.duplicate_of_id}`}><Badge tone="muted">{v("duplicate")} → #{r.duplicate_of_id}</Badge></Link> : null}
       </div>
 
@@ -130,7 +133,19 @@ function Body({ r, reload }: { r: ResourceFull; reload: () => void }) {
         </div>
       ) : null}
 
+      {(r.extra || {}).relevance_reason ? (
+        <p className="small muted" dir="auto"><strong>{t("relevance_reason")}:</strong> {String((r.extra || {}).relevance_reason)}</p>
+      ) : null}
+
+      {r.archived && !r.deleted ? (
+        <div className="alert alert-info bulk-bar" role="status">
+          <span>{t("archived_banner")}{(r.extra || {}).archived_reason ? ` ${t("archived_reason")}: ${String((r.extra || {}).archived_reason)}.` : ""}</span>
+          <ActionButton onRun={act("unarchive")}>{t("unarchive_item")}</ActionButton>
+        </div>
+      ) : null}
+
       <div className="toolbar spaced">
+        {!r.archived && !r.deleted ? <ActionButton onRun={act("archive")}>{t("archive_item")}</ActionButton> : null}
         <ActionButton onRun={act("reprocess")}>{t("reprocess")}</ActionButton>
         <ActionButton onRun={act("reanalyze")}>{t("reanalyze")}</ActionButton>
         <ActionButton onRun={act("acquire")}>{t("acquire")}</ActionButton>
@@ -401,6 +416,8 @@ function EditCard({ r, reload }: { r: ResourceFull; reload: () => void }) {
   const [pillars, setPillars] = useState<string[]>(r.pillars.map((p) => p.pillar));
   const [labels, setLabels] = useState((r.labels || []).join(", "));
   const [notes, setNotes] = useState(String((r.extra || {}).user_notes || ""));
+  const userRel = (r.extra || {}).relevance_user;
+  const [relevance, setRelevance] = useState(userRel === undefined || userRel === null ? "" : String(userRel));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -411,7 +428,7 @@ function EditCard({ r, reload }: { r: ResourceFull; reload: () => void }) {
     setMsg(null);
     try {
       await api.patch(`/api/resources/${r.id}`, {
-        title, resource_type: type, access_status: access, pillars, notes,
+        title, resource_type: type, access_status: access, pillars, notes, relevance: relevance === "" ? null : Number(relevance),
         labels: labels.split(/[,،]/).map((x) => x.trim()).filter(Boolean),
       });
       setMsg({ ok: true, text: t("ok_done") });
@@ -460,6 +477,10 @@ function EditCard({ r, reload }: { r: ResourceFull; reload: () => void }) {
         </fieldset>
         <label>{t("labels")}
           <input type="text" dir="auto" value={labels} placeholder={t("labels_hint")} onChange={(e) => setLabels(e.target.value)} />
+        </label>
+        <label title={t("relevance_help")}>{t("relevance")} (0-100)
+          <input type="number" min={0} max={100} value={relevance} placeholder={r.relevance === null || r.relevance === undefined ? "" : String(r.relevance)}
+            onChange={(e) => setRelevance(e.target.value)} />
         </label>
         <label>{t("notes")}<textarea dir="auto" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
       </div>

@@ -5,6 +5,7 @@ result; refined rows are stored with method='ai' so both are distinguishable.
 """
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -40,6 +41,13 @@ class Classification:
     topics: dict[int, float] = field(default_factory=dict)
     age_groups: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
+    relevance: int = 0          # 0-100: how strongly the item is about tarbiyah (pillar/topic/focus words)
+    excluded_by: str | None = None  # exclude term found in the title or description
+
+
+def relevance_score(strength: float) -> int:
+    """Keyword strength -> 0-100. One title mention ~ 20, a few mentions ~ 50, a focused book ~ 90+."""
+    return int(round(100 * (1 - math.exp(-max(0.0, strength) / 15))))
 
 
 def classify_text(session: Session, title: str, description: str = "", body: str = "",
@@ -69,6 +77,21 @@ def classify_text(session: Session, title: str, description: str = "", body: str
             if t.pillar:
                 raw[t.pillar] = raw.get(t.pillar, 0) + score * 0.5
     top = max(raw.values()) if raw else 0
+    from ..settings import get_setting
+
+    focus = 0.0
+    for kw in get_setting("focus_terms", session) or []:
+        for hay, w in weighted:
+            n = _count(hay, str(kw))
+            if n:
+                focus += w * min(n, 5)
+    out.relevance = relevance_score(top + 0.5 * max(out.topics.values(), default=0) + focus)
+    head = _stem_seq(f"{title or ''} {description or ''}")
+    for kw in get_setting("exclude_terms", session) or []:
+        if str(kw).strip() and _count(head, str(kw)):
+            out.excluded_by = str(kw)
+            out.relevance = 0
+            break
     if top >= 3:
         for p, s in raw.items():
             if s >= 3 and s >= 0.35 * top:
@@ -107,3 +130,14 @@ def apply_classification(session: Session, r: Resource, c: Classification, metho
     r.extra = extra
     if c.keywords and not r.keywords:
         r.keywords = c.keywords
+    extra = dict(r.extra or {})
+    if method == "rules":
+        extra["relevance_rules"] = c.relevance
+        if c.excluded_by:
+            extra["excluded_by"] = c.excluded_by
+        else:
+            extra.pop("excluded_by", None)
+    r.extra = extra
+    from .manage import auto_curate
+
+    auto_curate(session, r)

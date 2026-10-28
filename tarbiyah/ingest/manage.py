@@ -1,4 +1,8 @@
-"""User curation of the library: edit, label, delete (and undo delete).
+"""User curation of the library: edit, label, archive, delete (and undo), relevance.
+
+Archive puts an item aside: it keeps its file and text but is hidden from the library, search,
+research and reports until it is unarchived. Items can be archived automatically by the
+relevance rules (exclude words, auto_archive_below); the user's own choice always wins.
 
 Deleting keeps a small record (title, link, checksum) marked `deleted`, so the same item is
 recognised as a duplicate and is NOT collected again by later searches or crawls. Its file,
@@ -68,6 +72,78 @@ def restore_resource(session: Session, r: Resource) -> str:
     return "restored"
 
 
+USER_METHODS = {"manual", "local_import", "upload"}
+
+
+def _final_relevance(r: Resource) -> int | None:
+    ex = r.extra or {}
+    for k in ("relevance_user", "relevance_ai", "relevance_rules"):
+        if ex.get(k) is not None:
+            return int(ex[k])
+    return None
+
+
+def auto_curate(session: Session, r: Resource) -> None:
+    """Set the final relevance and apply the automatic archive rules (never overriding the user)."""
+    from ..settings import get_setting
+
+    r.relevance = _final_relevance(r)
+    ex = r.extra or {}
+    if r.deleted or ex.get("archived_by") == "user" or r.collection_method in USER_METHODS:
+        return
+    threshold = int(get_setting("auto_archive_below", session) or 0)
+    reason = None
+    if ex.get("excluded_by") and ex.get("relevance_user") is None:
+        reason = f"contains the excluded word '{ex['excluded_by']}'"
+    elif threshold and r.relevance is not None and r.relevance < threshold:
+        reason = f"relevance {r.relevance} is below {threshold}"
+    if reason and not r.archived:
+        archive_resource(session, r, by="auto", reason=reason)
+    elif not reason and r.archived and ex.get("archived_by") == "auto":
+        unarchive_resource(session, r, by="auto")
+
+
+def archive_resource(session: Session, r: Resource, by: str = "user", reason: str | None = None) -> None:
+    r.archived = True
+    r.extra = {**(r.extra or {}), "archived_by": by, "archived_reason": reason or "archived by the user",
+               "archived_at": utcnow().isoformat()}
+
+
+def unarchive_resource(session: Session, r: Resource, by: str = "user") -> None:
+    r.archived = False
+    extra = {k: v for k, v in (r.extra or {}).items() if k not in ("archived_reason", "archived_at")}
+    # the user's decision to keep it sticks: automatic rules will not archive it again
+    extra["archived_by"] = "user" if by == "user" else None
+    r.extra = extra
+
+
+def set_relevance(session: Session, r: Resource, value: int | None) -> None:
+    extra = dict(r.extra or {})
+    if value is None:
+        extra.pop("relevance_user", None)
+    else:
+        extra["relevance_user"] = max(0, min(100, int(value)))
+    r.extra = extra
+    auto_curate(session, r)
+
+
+def reclassify(session: Session, r: Resource) -> None:
+    """Run the keyword rules again (after new focus/exclude words or glossary terms)."""
+    from ..storage import absolute as _abs
+    from .classify import apply_classification, classify_text
+
+    body = ""
+    if r.text_path:
+        try:
+            body = _abs(r.text_path).read_text(encoding="utf-8")[:30000]
+        except OSError:
+            body = ""
+    if not body:
+        body = " ".join(c for (c,) in session.execute(
+            select(Chunk.text).where(Chunk.resource_id == r.id).order_by(Chunk.seq).limit(20)))
+    apply_classification(session, r, classify_text(session, r.title, r.description or "", body, r.keywords))
+
+
 def set_pillars(session: Session, r: Resource, pillars: list[str]) -> None:
     bad = [p for p in pillars if p not in PILLAR_LABELS]
     if bad:
@@ -125,6 +201,12 @@ def update_resource(session: Session, r: Resource, changes: dict[str, Any]) -> l
     if labels != (r.labels or []):
         r.labels = labels
         done.append("labels")
+    if "relevance" in changes:
+        set_relevance(session, r, None if changes["relevance"] in (None, "") else int(changes["relevance"]))
+        done.append("relevance")
+    if "archived" in changes:
+        (archive_resource if changes["archived"] else unarchive_resource)(session, r)
+        done.append("archived")
     if "notes" in changes:
         r.extra = {**(r.extra or {}), "user_notes": str(changes["notes"])[:5000]}
         done.append("notes")
@@ -154,6 +236,18 @@ def bulk(session: Session, ids: list[int], action: str, value: Any = None) -> di
                 update_resource(session, r, {"remove_labels": [value]})
             elif action == "set_type":
                 update_resource(session, r, {"resource_type": value})
+            elif action == "archive":
+                archive_resource(session, r)
+            elif action == "unarchive":
+                unarchive_resource(session, r)
+            elif action == "reclassify":
+                reclassify(session, r)
+            elif action == "analyze":
+                from ..jobs import queue
+
+                queue.enqueue(session, "analyze", {"resource_id": r.id}, group="ai", dedupe_key=f"analyze:{r.id}")
+            elif action == "set_relevance":
+                set_relevance(session, r, None if value in (None, "") else int(value))
             else:
                 raise ValueError(f"Unknown action '{action}'")
             ok += 1

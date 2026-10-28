@@ -92,6 +92,8 @@ export interface ResourceBrief {
   discovered_at: string | null;
   has_file: boolean;
   labels?: string[];
+  relevance?: number | null;
+  archived?: boolean;
   role?: string;
 }
 

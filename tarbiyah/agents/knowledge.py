@@ -125,7 +125,13 @@ def analyze_resource(session: Session, r: Resource) -> dict:
     extra = dict(r.extra or {})
     extra["age_groups"] = sorted(set((extra.get("age_groups") or []) + list(out.age_groups)))
     extra["target_audience"] = out.target_audience
+    if 0 <= out.relevance <= 100:
+        extra["relevance_ai"] = int(out.relevance)
+        extra["relevance_reason"] = out.relevance_reason[:400]
     r.extra = extra
+    from ..ingest.manage import auto_curate
+
+    auto_curate(session, r)
     r.ai_status = "done"
     r.updated_at = utcnow()
     fts.index_resource(session, r)  # title translation becomes searchable

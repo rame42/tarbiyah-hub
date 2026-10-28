@@ -22,7 +22,7 @@ interface SearchResponse {
 export const ACCESS_VALUES = ["open_access", "open_license", "public_domain", "user_provided", "paid", "lending_only", "restricted", "unknown"];
 export const PROCESSING_VALUES = ["pending", "metadata_only", "downloaded", "text_collected", "extracted", "needs_ocr", "low_quality", "failed", "skipped_limit"];
 export const RESOURCE_TYPES = ["book", "article", "paper", "thesis", "report", "document", "video", "podcast_episode", "social_post", "other"];
-const FILTER_KEYS = ["language", "pillar", "type", "access", "source", "topic", "date_from", "date_to", "status", "label", "show_deleted"] as const;
+const FILTER_KEYS = ["language", "pillar", "type", "access", "source", "topic", "date_from", "date_to", "status", "label", "view", "sort", "min_relevance", "max_relevance"] as const;
 const PAGE_SIZE = 20;
 
 export default function Library() {
@@ -42,6 +42,7 @@ export default function Library() {
     const val = sp.get(k);
     if (val) filters[k] = val;
   });
+  const view = sp.get("show_deleted") === "true" ? "deleted" : sp.get("view") || "active";
   const key = sp.toString();
   const state = useAsync(
     () => api.get<SearchResponse>(`/api/resources${qs({ q, ...filters, page, page_size: PAGE_SIZE, cross_language: crossLanguage })}`),
@@ -108,17 +109,38 @@ export default function Library() {
           <summary>{t("filters")}{Object.keys(filters).length ? ` (${Object.keys(filters).length})` : ""}</summary>
           <div className="form-grid">
             {sel("language", t("language"), [["ar", t("lang_ar")], ["en", t("lang_en")], ["mixed", t("lang_mixed")]])}
-            {sel("pillar", t("pillar"), [["children", t("pillar_children")], ["parents", t("pillar_parents")], ["murabbi", t("pillar_murabbi")]])}
+            {sel("pillar", t("pillar"), [["children", t("pillar_children")], ["parents", t("pillar_parents")], ["murabbi", t("pillar_murabbi")], ["none", t("unclassified_np")]])}
             {sel("type", t("resource_type"), types.map((x) => [x, v(x)]))}
             {sel("access", t("access_status"), ACCESS_VALUES.map((x) => [x, v(x)]))}
             {sel("source", t("source"), (m?.source_keys || []).map((x) => [x, x]))}
             {sel("topic", t("topic"), (m?.topics || []).map((x) => [String(x.id), lang === "ar" ? x.name_ar : x.name_en]))}
             {sel("status", t("processing_status"), PROCESSING_VALUES.map((x) => [x, v(x)]))}
             {sel("label", t("label"), (labelList.data || []).map((x) => [x.label, `${x.label} (${x.count})`]))}
-            <label className="check">
-              <input type="checkbox" checked={sp.get("show_deleted") === "true"}
-                onChange={(e) => update({ show_deleted: e.target.checked ? "true" : null })} />
-              {t("show_deleted")}
+            <label className="field">
+              <span>{t("lib_view")}</span>
+              <select value={view} onChange={(e) => update({ view: e.target.value === "active" ? null : e.target.value, show_deleted: null })}>
+                <option value="active">{t("view_active")}</option>
+                <option value="archived">{t("view_archived")}</option>
+                <option value="deleted">{t("view_deleted")}</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("sort_by")}</span>
+              <select value={sp.get("sort") || "newest"} onChange={(e) => update({ sort: e.target.value === "newest" ? null : e.target.value })}>
+                {["newest", "oldest", "relevance_low", "relevance_high"].map((x) => (
+                  <option key={x} value={x}>{t(`sort_${x}` as never)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("min_relevance")}</span>
+              <input type="number" min={0} max={100} value={sp.get("min_relevance") || ""} title={t("relevance_help")}
+                onChange={(e) => update({ min_relevance: e.target.value || null })} />
+            </label>
+            <label className="field">
+              <span>{t("max_relevance")}</span>
+              <input type="number" min={0} max={100} value={sp.get("max_relevance") || ""} title={t("relevance_help")}
+                onChange={(e) => update({ max_relevance: e.target.value || null })} />
             </label>
             <label className="field">
               <span>{t("date_from")}</span>
@@ -149,7 +171,7 @@ export default function Library() {
             {d.results.length === 0 ? <p className="muted">{t("no_results")}</p> : (
               <div className="res-list">
                 <BulkBar ids={d.results.map((r) => r.resource.id)} selected={selected} setSelected={setSelected}
-                  deletedView={sp.get("show_deleted") === "true"}
+                  view={view}
                   onDone={() => { state.reload(); labelList.reload(); }} />
                 {d.results.map((r) => (
                   <div key={r.resource.id} className="res-result res-select">
@@ -340,18 +362,25 @@ function AddByUrlForm() {
 
 const PILLARS = ["children", "parents", "murabbi"];
 
-function BulkBar({ ids, selected, setSelected, deletedView, onDone }: {
-  ids: number[]; selected: number[]; setSelected: (x: number[]) => void; deletedView: boolean; onDone: () => void;
+const VIEW_ACTIONS: Record<string, string[]> = {
+  active: ["archive", "delete", "set_pillars", "set_access", "add_label", "remove_label", "set_type", "set_relevance", "reclassify", "analyze"],
+  archived: ["unarchive", "delete", "add_label", "remove_label", "set_relevance"],
+  deleted: ["restore"],
+};
+
+function BulkBar({ ids, selected, setSelected, view, onDone }: {
+  ids: number[]; selected: number[]; setSelected: (x: number[]) => void; view: string; onDone: () => void;
 }) {
   const { t, v } = useI18n();
-  const [action, setAction] = useState(deletedView ? "restore" : "delete");
+  const actions = VIEW_ACTIONS[view] || VIEW_ACTIONS.active;
+  const [action, setAction] = useState(actions[0]);
   const [value, setValue] = useState("");
   const [armed, setArmed] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { setAction(deletedView ? "restore" : "delete"); }, [deletedView]);
+  useEffect(() => { setAction(actions[0]); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setValue(""); setArmed(false); }, [action]);
   const allOnPage = ids.length > 0 && ids.every((i) => selected.includes(i));
-  const needsValue = ["set_access", "set_pillars", "add_label", "remove_label", "set_type"].includes(action);
+  const needsValue = ["set_access", "set_pillars", "add_label", "remove_label", "set_type", "set_relevance"].includes(action);
 
   const apply = async () => {
     setMsg(null);
@@ -376,14 +405,7 @@ function BulkBar({ ids, selected, setSelected, deletedView, onDone }: {
       </label>
       <strong>{selected.length} {t("selected_n")}</strong>
       <select aria-label={t("bulk_action")} value={action} onChange={(e) => setAction(e.target.value)}>
-        {deletedView ? <option value="restore">{t("act_restore")}</option> : <>
-          <option value="delete">{t("act_delete")}</option>
-          <option value="set_access">{t("act_set_access")}</option>
-          <option value="set_pillars">{t("act_set_pillars")}</option>
-          <option value="add_label">{t("act_add_label")}</option>
-          <option value="remove_label">{t("act_remove_label")}</option>
-          <option value="set_type">{t("act_set_type")}</option>
-        </>}
+        {actions.map((a) => <option key={a} value={a}>{t(`act_${a}` as never)}</option>)}
       </select>
       {action === "set_access" ? (
         <select aria-label={t("access_status")} value={value} onChange={(e) => setValue(e.target.value)}>
@@ -400,6 +422,8 @@ function BulkBar({ ids, selected, setSelected, deletedView, onDone }: {
           <option value="">—</option>
           {RESOURCE_TYPES.map((x) => <option key={x} value={x}>{v(x)}</option>)}
         </select>
+      ) : action === "set_relevance" ? (
+        <input type="number" min={0} max={100} aria-label={t("relevance")} value={value} onChange={(e) => setValue(e.target.value)} />
       ) : needsValue ? (
         <input type="text" dir="auto" placeholder={t("label")} value={value} onChange={(e) => setValue(e.target.value)} />
       ) : null}

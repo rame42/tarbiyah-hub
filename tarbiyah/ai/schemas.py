@@ -66,6 +66,11 @@ class KnowledgeExtraction(BaseModel):
     relations: list[RelationOut]
     limitations: list[str]
     quality_notes: str = Field(description="Transparent notes on provenance, methodology and possible bias.")
+    relevance: int = Field(-1, description="0-100: how useful this source is for research on Islamic tarbiyah of "
+                                           "children, parents/family or murabbi development. 0 = unrelated (e.g. "
+                                           "sports news), 30 = general parenting/education only loosely connected, "
+                                           "60 = clearly about one pillar, 90+ = central, substantive source.")
+    relevance_reason: str = Field("", description="One short sentence explaining the relevance score.")
 
 
 class SearchQuery(BaseModel):

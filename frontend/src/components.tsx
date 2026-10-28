@@ -355,6 +355,13 @@ export function WatchButton({ url, type, seconds, small }: { url: string | null 
 }
 
 /** One-line resource summary used in lists. */
+export function RelevanceBadge({ value }: { value?: number | null }) {
+  const { t } = useI18n();
+  if (value === null || value === undefined) return null;
+  const tone = value >= 40 ? "good" : value >= 20 ? "warn" : "bad";
+  return <span className={`badge badge-${tone}`} title={t("relevance_help")}>{t("relevance_short")} {value}</span>;
+}
+
 export function ResourceItem({ r }: { r: ResourceBrief }) {
   const { t } = useI18n();
   return (
@@ -370,6 +377,7 @@ export function ResourceItem({ r }: { r: ResourceBrief }) {
         <Badge value={r.access_status} />
         {r.has_file ? <span className="badge badge-info">{t("has_file")}</span> : null}
         <PillarBadges pillars={r.pillars} />
+        <RelevanceBadge value={r.relevance} />
         {(r.labels || []).map((lb) => <span key={lb} className="badge badge-label" dir="auto">🏷 {lb}</span>)}
         <WatchButton url={r.url} type={r.type} small />
         {r.url && !videoPlatform(r.url) && r.type !== "video" && !r.has_file ? (

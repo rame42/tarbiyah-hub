@@ -57,3 +57,66 @@ def test_edit_label_delete_restore_bulk(env, fixtures_dir):
         assert c.post("/api/resources/bulk", json={"ids": [rid], "action": "nonsense"}).status_code == 400
         assert c.post("/api/resources/bulk", json={"ids": [rid, uid], "action": "delete"}).json()["done"] == 2
         assert c.get("/api/resources").json()["total"] == 0
+
+
+def _web(s, title, desc, url):
+    r, _ = register_with_content(s, ResourceIn(title=title, url=url, resource_type="article", description=desc,
+                                               access=decide(None), collection_method="api", source_key="openalex"))
+    process(s, r)
+    return r
+
+
+def test_relevance_archive_and_cleanup(env, fixtures_dir):
+    from tarbiyah.api.app import app
+    from tarbiyah.settings import set_setting
+
+    with session_scope() as s:
+        good = _web(s, "Raising children: parenting with patience in Islamic tarbiyah",
+                    "Guidance for parents on the upbringing of children, child discipline and family worship.",
+                    "https://ex.org/good")
+        off = _web(s, "Football transfer news", "The striker signed a new contract with the club.",
+                   "https://ex.org/off")
+        sports = _web(s, "Parenting and football", "Parents watching children play football; parenting tips.",
+                      "https://ex.org/sports")
+        ids = good.id, off.id, sports.id
+        assert good.relevance >= 40 and off.relevance == 0 and good.pillars and not off.pillars
+    with TestClient(app) as c:
+        summ = c.get("/api/curation").json()
+        assert summ["active"] == 3 and summ["unclassified"] >= 1 and summ["low_relevance"] >= 1
+        assert c.get("/api/resources", params={"pillar": "none"}).json()["total"] == summ["unclassified"]
+        assert c.get("/api/resources", params={"sort": "relevance_low"}).json()["results"][0]["resource"]["id"] == ids[1]
+        # clean-up: preview, then archive everything below 20
+        prev = c.post("/api/curation/archive-low", json={"below": 20, "dry_run": True}).json()
+        assert prev["would_archive"] >= 1 and any(e["id"] == ids[1] for e in prev["examples"])
+        assert c.post("/api/curation/archive-low", json={"below": 20, "dry_run": False}).json()["archived"] >= 1
+        assert c.get("/api/resources", params={"view": "archived"}).json()["total"] >= 1
+        assert c.get("/api/resources", params={"q": "football transfer"}).json()["total"] == 0  # hidden from search
+        assert c.get("/api/resources", params={"q": "football transfer", "view": "archived"}).json()["total"] == 1
+        # unarchive is sticky: automatic rules will not archive it again
+        assert c.post(f"/api/resources/{ids[1]}/unarchive").json()["status"] == "unarchived"
+        # exclude words + auto-archive for new items
+        assert c.patch("/api/settings", json={"exclude_terms": ["football"], "auto_archive_below": 15}).json()["ok"]
+        assert c.patch("/api/settings", json={"exclude_terms": "football"}).status_code == 400
+    with session_scope() as s:
+        new = _web(s, "Football league table", "Weekly results.", "https://ex.org/new-off")
+        assert new.archived and "excluded word" in new.extra["archived_reason"]
+        kept = s.get(Resource, ids[1])
+        from tarbiyah.ingest.manage import reclassify
+        reclassify(s, kept)
+        assert not kept.archived  # the user's decision wins
+        upload, _ = import_local_file(s, fixtures_dir / "ar_tarbiyah.pdf")
+        process(s, upload)
+        assert not upload.archived  # the user's own files are never archived automatically
+    # focus words raise relevance; re-sorting runs as a background job
+    with TestClient(app) as c:
+        c.patch("/api/settings", json={"exclude_terms": [], "focus_terms": ["striker", "contract"]})
+        assert c.post("/api/curation/rescore", json={"scope": "all", "ai": False}).json()["job_id"]
+    drain(30)
+    with session_scope() as s:
+        assert s.get(Resource, ids[1]).relevance > 0
+        assert s.get(Resource, ids[0]).relevance >= 40
+        # set relevance by hand
+        from tarbiyah.ingest.manage import set_relevance
+        r = s.get(Resource, ids[2])
+        set_relevance(s, r, 90)
+        assert r.relevance == 90

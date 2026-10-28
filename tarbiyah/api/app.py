@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import String, func, or_, select
+from sqlalchemy import String, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..bootstrap import init_app
@@ -46,6 +46,7 @@ from ..models import (
     Topic,
 )
 from ..search.fts import SearchFilters, resource_brief, search
+from ..ai.claude import claude
 from ..settings import DEFAULTS, flush_usage, get_all, set_setting
 from ..sources.registry import ADAPTERS, adapter_status
 from ..storage import absolute
@@ -141,16 +142,26 @@ def rebuild_report(day: str, s: Session = Depends(get_session)) -> dict[str, Any
 def list_resources(q: str = "", language: str | None = None, pillar: str | None = None, type: str | None = None,
                    access: str | None = None, source: str | None = None, topic: int | None = None,
                    date_from: str | None = None, date_to: str | None = None, status: str | None = None,
-                   label: str | None = None, show_deleted: bool = False,
+                   label: str | None = None, show_deleted: bool = False, view: str = "active",
+                   min_relevance: int | None = None, max_relevance: int | None = None, sort: str = "newest",
                    page: int = 1, page_size: int = 25, cross_language: bool = True,
                    s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..search.fts import pillar_clause, view_clause
+
+    if show_deleted:
+        view = "deleted"
     f = SearchFilters(language=language, pillar=pillar, resource_type=type, access_status=access, source_key=source,
-                      topic_id=topic, discovered_from=date_from, discovered_to=date_to, label=label)
+                      topic_id=topic, discovered_from=date_from, discovered_to=date_to, label=label, view=view,
+                      min_relevance=min_relevance, max_relevance=max_relevance)
     offset = (max(1, page) - 1) * page_size
-    if q.strip() and not show_deleted:
+    if q.strip() and view != "deleted":
         res = search(s, q, f, limit=page_size, offset=offset, cross_language=cross_language)
         return {**res, "page": page, "page_size": page_size}
-    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None), Resource.deleted.is_(show_deleted))
+    stmt = select(Resource).where(Resource.duplicate_of_id.is_(None), view_clause(view))
+    if min_relevance is not None:
+        stmt = stmt.where(Resource.relevance >= min_relevance)
+    if max_relevance is not None:
+        stmt = stmt.where(Resource.relevance <= max_relevance)
     if label:
         import json as _json
 
@@ -170,11 +181,14 @@ def list_resources(q: str = "", language: str | None = None, pillar: str | None 
     if date_to:
         stmt = stmt.where(Resource.discovered_at < date_to + "T23:59:59.999")
     if pillar:
-        stmt = stmt.where(Resource.id.in_(select(ResourcePillar.resource_id).where(ResourcePillar.pillar == pillar)))
+        stmt = stmt.where(pillar_clause(pillar))
     if topic:
         stmt = stmt.where(Resource.id.in_(select(ResourceTopic.resource_id).where(ResourceTopic.topic_id == topic)))
     total = s.execute(select(func.count()).select_from(stmt.subquery())).scalar()
-    rows = s.execute(stmt.order_by(Resource.discovered_at.desc()).offset(offset).limit(page_size)).scalars().all()
+    order = {"relevance_low": (Resource.relevance.asc().nulls_first(), Resource.id.desc()),
+             "relevance_high": (Resource.relevance.desc().nulls_last(), Resource.id.desc()),
+             "oldest": (Resource.discovered_at.asc(),)}.get(sort, (Resource.discovered_at.desc(),))
+    rows = s.execute(stmt.order_by(*order).offset(offset).limit(page_size)).scalars().all()
     return {"query": "", "total": total, "page": page, "page_size": page_size,
             "results": [{"resource": resource_brief(r), "passage": None,
                          "description_snippet": (r.description or "")[:240] or None} for r in rows]}
@@ -313,6 +327,11 @@ def resource_action(rid: int, action: str, s: Session = Depends(get_session)) ->
         from ..ingest.manage import restore_resource
 
         return {"status": restore_resource(s, r)}
+    if action in ("archive", "unarchive"):
+        from ..ingest.manage import archive_resource, unarchive_resource
+
+        (archive_resource if action == "archive" else unarchive_resource)(s, r)
+        return {"status": action + "d"}
     mapping = {"reprocess": ("process", "processing"), "reanalyze": ("analyze", "ai"), "acquire": ("acquire", "acquisition")}
     if action not in mapping:
         raise HTTPException(400, "unknown action")
@@ -321,6 +340,100 @@ def resource_action(rid: int, action: str, s: Session = Depends(get_session)) ->
         r.acquisition_status = "pending" if r.download_permitted and r.download_url else r.acquisition_status
     j = queue.enqueue(s, jt, {"resource_id": rid}, priority=40, group=group, dedupe_key=f"{jt}:{rid}")
     return {"job_id": j.id}
+
+
+# ============================================================== sort & clean
+
+class CurateIn(BaseModel):
+    scope: str = "unclassified"  # unclassified | all
+    ai: bool = True
+
+
+class ArchiveLowIn(BaseModel):
+    below: int = 20
+    dry_run: bool = True
+    only_unclassified: bool = False
+    source: str | None = None
+
+
+def _archive_low_stmt(body: ArchiveLowIn):
+    from ..search.fts import pillar_clause, view_clause
+
+    stmt = select(Resource).where(view_clause("active"), Resource.duplicate_of_id.is_(None),
+                                  Resource.relevance.is_not(None), Resource.relevance < body.below)
+    if body.only_unclassified:
+        stmt = stmt.where(pillar_clause("none"))
+    if body.source:
+        stmt = stmt.where(Resource.source_key == body.source)
+    return stmt
+
+
+@app.get("/api/curation")
+def curation_summary(below: int = 20, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..search.fts import pillar_clause, view_clause
+
+    def count(*conds) -> int:
+        return s.execute(select(func.count()).select_from(Resource)
+                         .where(Resource.duplicate_of_id.is_(None), *conds)).scalar() or 0
+
+    active = view_clause("active")
+    buckets = []
+    for lo, hi in ((0, 19), (20, 39), (40, 59), (60, 79), (80, 100)):
+        buckets.append({"from": lo, "to": hi, "count": count(active, Resource.relevance >= lo, Resource.relevance <= hi)})
+    rows = s.execute(select(Resource.source_key, func.count(), func.avg(Resource.relevance),
+                            func.sum(case((Resource.relevance >= 40, 1), else_=0)),
+                            func.sum(case((Resource.archived.is_(True), 1), else_=0)))
+                     .where(Resource.deleted.is_(False), Resource.duplicate_of_id.is_(None))
+                     .group_by(Resource.source_key)).all()
+    names = {src.key: (src.id, src.name, src.enabled) for src in s.execute(select(Source)).scalars()}
+    sources = []
+    for key, n, avg, good, arch in rows:
+        sid, name, enabled = names.get(key or "", (None, key or "?", None))
+        sources.append({"key": key, "source_id": sid, "name": name, "enabled": enabled, "items": n,
+                        "avg_relevance": round(avg) if avg is not None else None,
+                        "relevant_pct": round(100 * (good or 0) / n) if n else 0, "archived": int(arch or 0)})
+    sources.sort(key=lambda x: (x["relevant_pct"], -x["items"]))
+    settings = get_all(s)
+    running = s.execute(select(Job).where(Job.job_type == "curate_all", Job.status.in_(queue.ACTIVE))).scalars().first()
+    return {
+        "active": count(active),
+        "unclassified": count(active, pillar_clause("none")),
+        "unscored": count(active, Resource.relevance.is_(None)),
+        "low_relevance": count(active, Resource.relevance < below),
+        "below": below,
+        "archived": count(view_clause("archived")),
+        "archived_auto": count(view_clause("archived"), Resource.extra["archived_by"].as_string() == "auto"),
+        "deleted": count(view_clause("deleted")),
+        "buckets": buckets,
+        "sources": sources,
+        "focus_terms": settings["focus_terms"], "exclude_terms": settings["exclude_terms"],
+        "auto_archive_below": settings["auto_archive_below"],
+        "ai_available": claude().available(),
+        "job_running": {"id": running.id, "checkpoint": running.checkpoint} if running else None,
+    }
+
+
+@app.post("/api/curation/rescore")
+def curation_rescore(body: CurateIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    if body.scope not in ("unclassified", "all"):
+        raise HTTPException(400, "scope must be 'unclassified' or 'all'")
+    j = queue.enqueue(s, "curate_all", {"scope": body.scope, "ai": body.ai}, priority=30, group="processing",
+                      dedupe_key=f"curate_all:{body.scope}")
+    return {"job_id": j.id, "message": "Sorting started in the background."}
+
+
+@app.post("/api/curation/archive-low")
+def curation_archive_low(body: ArchiveLowIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.manage import archive_resource
+
+    items = [r for r in s.execute(_archive_low_stmt(body)).scalars()
+             if (r.extra or {}).get("archived_by") != "user"]  # items the user chose to keep stay
+    if body.dry_run:
+        return {"would_archive": len(items),
+                "examples": [{"id": r.id, "title": r.title, "relevance": r.relevance} for r in items[:8]]}
+    for r in items:
+        archive_resource(s, r, by="user", reason=f"archived in clean-up (relevance {r.relevance} < {body.below})")
+    return {"archived": len(items)}
 
 
 @app.post("/api/import")
@@ -812,6 +925,10 @@ def patch_settings(body: dict[str, Any], s: Session = Depends(get_session)) -> d
             raise HTTPException(400, f"{k} must be true/false")
         if isinstance(d, (int, float)) and not isinstance(d, bool) and not isinstance(v, (int, float)):
             raise HTTPException(400, f"{k} must be a number")
+        if isinstance(d, list) and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            raise HTTPException(400, f"{k} must be a list of words")
+        if isinstance(v, list):
+            v = [x.strip() for x in v if x.strip()][:300]
         set_setting(s, k, v)
     return {"ok": True}
 
