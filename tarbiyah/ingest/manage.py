@@ -75,6 +75,23 @@ def restore_resource(session: Session, r: Resource) -> str:
 USER_METHODS = {"manual", "local_import", "upload"}
 
 
+def is_my_source(src: Any) -> bool:
+    """A source the person added themselves (not a built-in search source, the inbox or an auto-added one)."""
+    cfg = (src.config or {}) if src is not None else {}
+    return bool(src is not None and cfg.get("role") == "monitor" and src.key != "inbox"
+                and cfg.get("added_by") != "auto")
+
+
+def keeps_everything(session: Session, r: Resource) -> bool:
+    """Items from the person's own monitored sources are never archived automatically."""
+    from ..models import Source
+
+    if not r.source_id:
+        return False
+    src = session.get(Source, r.source_id)
+    return is_my_source(src) and (src.config or {}).get("collect_everything", True) is not False
+
+
 def _final_relevance(r: Resource) -> int | None:
     ex = r.extra or {}
     for k in ("relevance_user", "relevance_ai", "relevance_rules"):
@@ -90,6 +107,10 @@ def auto_curate(session: Session, r: Resource) -> None:
     r.relevance = _final_relevance(r)
     ex = r.extra or {}
     if r.deleted or ex.get("archived_by") == "user" or r.collection_method in USER_METHODS:
+        return
+    if keeps_everything(session, r):
+        if r.archived and ex.get("archived_by") == "auto":
+            unarchive_resource(session, r, by="auto")
         return
     threshold = int(get_setting("auto_archive_below", session) or 0)
     reason = None

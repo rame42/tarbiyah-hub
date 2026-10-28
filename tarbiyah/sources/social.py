@@ -91,8 +91,9 @@ class TelegramAdapter(SourceAdapter):
                      "Files shared in channels are listed by title; they are not downloaded.",
         required_config=("channels",),
         default_schedule_minutes=360, min_interval_seconds=3.0,
-        config_fields={"channels": "List of public channel usernames (without @)", "max_pages": "Pages of history per run"},
-        default_config={"channels": [], "max_pages": 5},
+        config_fields={"channels": "List of public channel usernames (without @)", "max_pages": "Pages of history per run",
+                       "full_history": "Also collect the older history, a few pages per run (true/false)"},
+        default_config={"channels": [], "max_pages": 5, "full_history": True},
     )
 
     def collect(self, ctx: CollectContext) -> Iterator[ResourceIn]:
@@ -101,10 +102,15 @@ class TelegramAdapter(SourceAdapter):
         if not chans:
             raise ValueError("Telegram source has no channels configured.")
         last: dict[str, int] = dict(ctx.state.get("last_id", {}))
+        # the channel's older history is collected gradually: each run continues below the oldest message seen
+        oldest_seen: dict[str, int] = dict(ctx.state.get("oldest_id", {}))
+        done: dict[str, bool] = dict(ctx.state.get("history_done", {}))
         for ch in chans:
             newest = last.get(ch, 0)
             before = None
-            for _ in range(int(cfg.get("max_pages", 5))):
+            pages = int(cfg.get("max_pages", 5))
+            backfill = bool(cfg.get("full_history", True)) and not done.get(ch) and ch in oldest_seen
+            for _ in range(pages):
                 if ctx.should_stop():
                     break
                 base = str(cfg.get("base_url") or "https://t.me").rstrip("/")
@@ -126,11 +132,42 @@ class TelegramAdapter(SourceAdapter):
                                 ctx, "telegram_web_preview", {"links": m["links"][:20], "documents": m["documents"]})
                     newest = max(newest, m["id"])
                 oldest = min(m["id"] for m in msgs)
-                if len(fresh) < len(msgs) or oldest <= 1:
+                oldest_seen[ch] = min(oldest_seen.get(ch, oldest), oldest)
+                if oldest <= 1:
+                    done[ch] = True
+                    break
+                if len(fresh) < len(msgs):
                     break  # reached already-collected history
                 before = oldest
             last[ch] = newest
+            # older history: continue from the oldest message reached so far
+            while backfill and pages > 0 and not ctx.should_stop():
+                pages -= 1
+                base = str(cfg.get("base_url") or "https://t.me").rstrip("/")
+                try:
+                    res = http().fetch(f"{base}/s/{quote(ch)}?before={oldest_seen[ch]}",
+                                       min_interval=self.info.min_interval_seconds)
+                except FetchError as e:
+                    ctx.log(f"telegram {ch} (history): {e}")
+                    break
+                msgs = [m for m in parse_telegram_page(res.text, ch) if m["id"] < oldest_seen[ch]]
+                if not msgs:
+                    done[ch] = True
+                    ctx.log(f"telegram {ch}: the whole channel history is collected")
+                    break
+                for m in msgs:
+                    if not m["text"] and not m["documents"]:
+                        continue
+                    body = m["text"] + ("\n\nDocuments: " + "; ".join(m["documents"]) if m["documents"] else "")
+                    yield _post("", m["url"], body, "telegram", ch, (m["date"] or "")[:10] or None, f"{ch}/{m['id']}",
+                                ctx, "telegram_web_preview", {"links": m["links"][:20], "documents": m["documents"]})
+                oldest_seen[ch] = min(m["id"] for m in msgs)
+                if oldest_seen[ch] <= 1:
+                    done[ch] = True
+                    break
         ctx.state["last_id"] = last
+        ctx.state["oldest_id"] = oldest_seen
+        ctx.state["history_done"] = done
 
 
 # ------------------------------------------------------------------------------- Reddit

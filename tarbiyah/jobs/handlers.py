@@ -359,6 +359,16 @@ def daily_report_job(ctx: JobContext) -> dict[str, Any]:
     return {"day": day.isoformat(), "finalized": rep.finalized}
 
 
+@handler("suggest_sources")
+def suggest_sources_job(ctx: JobContext) -> dict[str, Any]:
+    from ..agents.suggest import find_suggestions
+
+    res = find_suggestions(ctx.session)
+    if res["auto_added"]:
+        ctx.audit("discovery", "auto_add_sources", "Added automatically: " + ", ".join(res["auto_added"]))
+    return res
+
+
 @handler("triage")
 def triage_job(ctx: JobContext) -> dict[str, Any]:
     """AI relevance screening of new items, 20 per request (bounded per run and by the daily AI limits)."""
@@ -434,6 +444,10 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
 
         if _candidates(s, 1):
             queue.enqueue(s, "triage", {"max_batches": 5}, priority=60, group="ai", dedupe_key="triage")
+    from ..agents.suggest import due as suggestions_due
+
+    if suggestions_due(s):  # every 6 hours: learn similar sources from what the person's sources collected
+        queue.enqueue(s, "suggest_sources", {}, priority=80, group="processing", dedupe_key="suggest_sources")
     # items from before relevance scoring existed get scored once, in the background
     if s.execute(select(Resource.id).where(Resource.relevance.is_(None), Resource.deleted.is_(False),
                                            Resource.index_status == "indexed").limit(1)).first():

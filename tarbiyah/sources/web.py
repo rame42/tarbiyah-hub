@@ -332,7 +332,11 @@ class WebCrawlerAdapter(SourceAdapter):
             access=decide(ex.license_hint),
             text=ex.full_text,
             extra={"crawl_depth": row.depth, "updated_content": changed, "content_hash": new_hash,
-                   "inline_method": "trafilatura"},
+                   "inline_method": "trafilatura",
+                   # links to other websites: used to suggest similar sources
+                   "outlinks": sorted({urljoin(res.final_url, lk.get("url", "")) for lk in ex.links
+                                       if lk.get("url", "").startswith("http")
+                                       and not _in_domains(lk.get("url", ""), domains)})[:100]},
         )
         if course:
             d.resource_type, d.title = "course", course["title"]

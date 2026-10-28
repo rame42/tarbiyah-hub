@@ -60,6 +60,8 @@ DEFAULTS: dict[str, Any] = {
     "auto_archive_below": 0,             # new automatically collected items scoring below this are archived (0 = off)
     "ai_triage": True,                   # the AI screens new items for relevance (20 per request)
     "research_trusted_only": False,      # research searches only scholarly and book sources
+    "auto_add_sources": False,           # add strong source suggestions automatically
+    "auto_add_min_mentions": 5,          # ...when mentioned by at least this many collected items
     # ui
     "ui_language": "en",
 }

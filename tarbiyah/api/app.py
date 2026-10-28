@@ -909,6 +909,87 @@ def _source(src: Source, s: Session) -> dict[str, Any]:
             "adapter_info": adapter_status(a) if a else None}
 
 
+# ============================================================== my sources & suggestions
+
+@app.get("/api/my-sources")
+def my_sources(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..agents.suggest import _state, list_suggestions
+    from ..ingest.manage import is_my_source
+
+    out = []
+    for src in s.execute(select(Source).order_by(Source.created_at)).scalars():
+        cfg = src.config or {}
+        if cfg.get("role") != "monitor" or src.key == "inbox":
+            continue
+        counts = dict(s.execute(select(Resource.archived, func.count()).where(
+            Resource.source_id == src.id, Resource.deleted.is_(False), Resource.duplicate_of_id.is_(None))
+            .group_by(Resource.archived)).all())
+        recent = s.execute(select(Resource).where(Resource.source_id == src.id, Resource.deleted.is_(False),
+                                                  Resource.archived.is_(False))
+                           .order_by(Resource.discovered_at.desc()).limit(5)).scalars().all()
+        out.append({**_source(src, s), "mine": is_my_source(src), "added_by": cfg.get("added_by", "user"),
+                    "suggested_because": cfg.get("suggested_because"),
+                    "collect_everything": cfg.get("collect_everything", True) is not False and is_my_source(src),
+                    "items": int(counts.get(False, 0)), "archived": int(counts.get(True, 0)),
+                    "history_done": bool((src.state or {}).get("history_done")),
+                    "recent": [resource_brief(r) for r in recent]})
+    st = _state(s)
+    settings = get_all(s)
+    return {"sources": out, "suggestions": list_suggestions(s), "suggestions_updated_at": st.get("updated_at"),
+            "auto_add_sources": settings["auto_add_sources"], "auto_add_min_mentions": settings["auto_add_min_mentions"]}
+
+
+class KeepIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/my-sources/{sid}/keep-everything")
+def keep_everything(sid: int, body: KeepIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..ingest.manage import auto_curate
+
+    src = s.get(Source, sid)
+    if src is None:
+        raise _404("source")
+    src.config = {**(src.config or {}), "collect_everything": body.on}
+    s.flush()
+    changed = 0
+    for r in s.execute(select(Resource).where(Resource.source_id == sid, Resource.deleted.is_(False))).scalars():
+        before = r.archived
+        auto_curate(s, r)  # brings back auto-archived items (on) or applies the relevance rules again (off)
+        changed += int(before != r.archived)
+    return {"collect_everything": body.on, "changed": changed}
+
+
+class SuggestionIn(BaseModel):
+    key: str
+
+
+@app.post("/api/suggestions/refresh")
+def suggestions_refresh(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..agents.suggest import find_suggestions
+
+    return find_suggestions(s)
+
+
+@app.post("/api/suggestions/add")
+def suggestions_add(body: SuggestionIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..agents.suggest import add_suggestion
+
+    try:
+        src = add_suggestion(s, body.key)
+    except KeyError:
+        raise _404("suggestion") from None
+    return _source(src, s)
+
+
+@app.post("/api/suggestions/dismiss")
+def suggestions_dismiss(body: SuggestionIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..agents.suggest import dismiss_suggestion
+
+    dismiss_suggestion(s, body.key)
+    return {"ok": True}
+
+
 @app.get("/api/sources")
 def sources(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     return [_source(x, s) for x in s.execute(select(Source).order_by(Source.adapter, Source.name)).scalars()]
@@ -930,10 +1011,20 @@ def create_source(body: SourceIn, s: Session = Depends(get_session)) -> dict[str
     a = ADAPTERS.get(body.adapter)
     if a is None or not a.supports("monitor"):
         raise HTTPException(400, "This adapter cannot be registered as a monitored source.")
-    key = body.key or re.sub(r"[^a-z0-9]+", "-", f"{body.adapter}-{body.name}".lower()).strip("-")[:100]
-    if s.execute(select(Source).where(Source.key == key)).first():
-        raise HTTPException(409, f"Source key '{key}' already exists")
-    cfg = {**a.info.default_config, **body.config, "role": "monitor"}
+    if body.key:
+        key = body.key
+        if s.execute(select(Source).where(Source.key == key)).first():
+            raise HTTPException(409, f"Source key '{key}' already exists")
+    else:
+        # names may be Arabic: the key keeps Latin letters/digits and gets a number when needed
+        base = re.sub(r"[^a-z0-9]+", "-", f"{body.adapter}-{body.name}".lower()).strip("-")[:90] or body.adapter
+        if base == body.adapter:
+            base = f"{body.adapter}-my"
+        key, n = base, 1
+        while s.execute(select(Source).where(Source.key == key)).first():
+            n += 1
+            key = f"{base}-{n}"
+    cfg = {**a.info.default_config, **body.config, "role": "monitor", "added_by": "user"}
     problems = a.config_problems(cfg)
     if problems:
         raise HTTPException(400, "Settings incomplete: " + " | ".join(problems))

@@ -108,3 +108,14 @@ last/next run, and error message. **Run now** starts it immediately. One failing
    permitted. Put collected text in `text=` or timestamped `segments=`.
 4. Register the adapter in `ADAPTERS` in `tarbiyah/sources/registry.py`.
 5. Add a test in `tests/test_collectors.py` with a sample response.
+
+## My Sources (the sources you add yourself)
+The **My Sources** tab lists the channels, websites, Telegram channels and feeds you added:
+- **Everything from them is kept**: their items are never archived automatically by the relevance rules or
+  the AI (switch "Keep everything from this source" off per source to filter it like the others).
+- **Older history** is collected gradually: Telegram channels go back through the whole channel, YouTube
+  channels through all uploads (with the YouTube key), websites through all pages over successive runs.
+- **Suggested similar sources** are learned from what your sources collected: YouTube channels mentioned in
+  video descriptions, Telegram channels linked in posts, websites your sites/videos keep linking to (checked
+  every 6 hours, or "Look for similar sources now"). Add or dismiss each; optionally add strong ones
+  automatically (their items stay relevance-filtered and they are marked "added automatically").
