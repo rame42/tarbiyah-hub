@@ -14,6 +14,8 @@ if "%OLD%"=="" (
   echo then paste it here ^(right-click^) and press Enter.
   set /p "OLD=Old folder: "
 )
+REM a path copied with "Copy as path" comes with quotes; remove them
+if defined OLD set "OLD=%OLD:"=%"
 echo Stopping this Tarbiyah Hub if it is running...
 .venv\Scripts\python.exe -m tarbiyah stop >nul 2>nul
 .venv\Scripts\python.exe -m tarbiyah import-old "%OLD%"

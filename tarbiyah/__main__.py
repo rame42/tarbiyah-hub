@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     rs = sub.add_parser("restore")
     rs.add_argument("archive")
     io = sub.add_parser("import-old")
-    io.add_argument("folder")
+    io.add_argument("folder", nargs="+")  # a path with spaces may arrive in pieces
     args = ap.parse_args(argv)
 
     _setup_logging()
@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         from .import_old import import_old
 
         try:
-            import_old(args.folder)
+            import_old(" ".join(args.folder))
         except (ValueError, RuntimeError, OSError) as e:
             print(f"Import failed: {e}")
             print("Nothing was changed in the old folder.")
