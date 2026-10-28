@@ -1227,6 +1227,13 @@ def patch_settings(body: dict[str, Any], s: Session = Depends(get_session)) -> d
             raise HTTPException(400, f"{k} must be a list of words")
         if isinstance(v, list):
             v = [x.strip() for x in v if x.strip()][:300]
+        if k.startswith("daily_") and isinstance(v, (int, float)) and v > (get_all(s).get(k) or 0):
+            # a higher daily limit: sources waiting for it may run again now
+            for src in s.execute(select(Source).where(Source.health == "waiting")).scalars():
+                src.health, src.last_error, src.next_run_at = "ready", None, utcnow()
+            for j in s.execute(select(Job).where(Job.status == "queued", Job.error.ilike("deferred:%"),
+                                             or_(Job.error.ilike("%limit%"), Job.error.ilike("%budget%")))).scalars():
+                j.run_after = utcnow()  # postponed work starts again now
         set_setting(s, k, v)
     return {"ok": True}
 

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from ..ai.claude import AIBudgetExceeded, AIRefused, AIUnavailable, claude
 from ..db import utcnow
+from ..http import BudgetExceeded
 from ..ingest.extract import SUPPORTED_EXT
 from ..ingest.pipeline import AcquisitionError, acquire, import_local_file, process, register_with_content, save_inline_segments
 from ..ingest.registry import ResourceIn
@@ -116,6 +117,10 @@ def collect_source(ctx: JobContext) -> dict[str, Any]:
         src.health, src.last_error = "running", str(e)
         s.commit()
         raise Deferred(str(e), utcnow() + timedelta(minutes=5)) from e
+    except BudgetExceeded as e:  # not a fault of the source: it waits for tomorrow (or a higher limit)
+        src.health, src.last_error = "waiting", waiting_message(e)
+        s.commit()
+        raise
     except Exception as e:
         src.health, src.last_error = "error", f"{type(e).__name__}: {e}"[:2000]
         s.commit()  # keep the health status even though the job fails
@@ -131,6 +136,11 @@ def collect_source(ctx: JobContext) -> dict[str, Any]:
         s.commit()  # keep what was collected; the rest resumes from the checkpoint
         raise Deferred("worker stopping; collection resumes from checkpoint", utcnow())
     return {"seen": seen, "new": created, "updated": updated, "messages": messages[-10:]}
+
+
+def waiting_message(e: Exception) -> str:
+    return (f"Waiting: {e}. This is a safety limit, not a problem with this source. It continues automatically "
+            f"after midnight, or now if you raise the limit in Settings.")
 
 
 @handler("search_source")
@@ -158,6 +168,11 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
         log_row.status, log_row.error = "not_configured", str(e)
         src.health, src.last_error = "needs_credentials", str(e)  # shown on the Sources card
         return {"skipped": str(e)}
+    except BudgetExceeded as e:
+        log_row.status, log_row.error = "waiting", str(e)
+        src.health, src.last_error = "waiting", waiting_message(e)
+        s.commit()
+        raise
     except Exception as e:
         log_row.status, log_row.error = "error", f"{type(e).__name__}: {e}"[:2000]
         src.health, src.last_error = "error", log_row.error

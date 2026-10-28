@@ -177,7 +177,7 @@ const BADGE_TONE: Record<string, string> = {
   done: "good", sufficient: "good", high: "good",
   failed: "bad", error: "bad", cancelled: "muted", deleted: "muted", contested: "warn", flagged: "warn",
   queued: "info", running: "info", investigating: "info", pending: "warn", retry: "warn", needs_ocr: "warn",
-  needs_credentials: "warn", paid: "warn", restricted: "bad", gap: "warn", insufficient: "warn", unresolved: "warn",
+  needs_credentials: "warn", waiting: "warn", paid: "warn", restricted: "bad", gap: "warn", insufficient: "warn", unresolved: "warn",
   deferred: "muted", duplicate: "muted", not_relevant: "muted", unknown: "muted", metadata_only: "muted",
   open: "info", partial: "warn", medium: "warn", low: "muted", paused: "warn",
 };

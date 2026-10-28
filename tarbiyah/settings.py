@@ -29,7 +29,7 @@ DEFAULTS: dict[str, Any] = {
     "search_repeat_days": 14,            # do not re-run an identical search within this many days
     "max_results_per_search": 15,
     # budgets (per day)
-    "daily_http_request_limit": 3000,
+    "daily_http_request_limit": 10000,
     "daily_download_limit": 150,
     "daily_download_mb_limit": 2000,
     "daily_ai_call_limit": 200,

@@ -7,6 +7,8 @@ from tarbiyah.ingest.pipeline import process, register_with_content
 from tarbiyah.ingest.registry import ResourceIn
 from tarbiyah.models import Resource, Source
 
+from .conftest import drain
+
 
 def _item(s, src, i, title, desc="", extra=None):
     r, _ = register_with_content(s, ResourceIn(
@@ -112,3 +114,31 @@ def test_arabic_source_names_get_unique_keys(env):
                                          "config": {"channel_ids": ["UCcCfpDNl1Bi-LopV2noq_pg"]}})
         assert a.status_code == 200 and b.status_code == 200
         assert a.json()["key"] == "youtube-my" and b.json()["key"] == "youtube-my-2"
+
+
+def test_daily_limit_shows_waiting_and_resumes_when_raised(env, monkeypatch):
+    from tarbiyah.api.app import app
+    from tarbiyah.http import BudgetExceeded
+    from tarbiyah.jobs import queue
+    from tarbiyah.models import Job
+    from tarbiyah.sources import youtube
+
+    def over(*a, **k):
+        raise BudgetExceeded("Daily HTTP request budget reached")
+
+    monkeypatch.setattr(youtube.YouTubeAdapter, "collect", over)
+    with TestClient(app) as c:
+        src = c.post("/api/sources", json={"adapter": "youtube", "name": "Ch",
+                                           "config": {"channel_ids": ["UCRtiU-lpcBSi-ipFKyfIkug"]}}).json()
+        c.post(f"/api/sources/{src['id']}/run")
+        drain(20)
+        card = [x for x in c.get("/api/sources").json() if x["id"] == src["id"]][0]
+        assert card["health"] == "waiting" and "not a problem with this source" in card["last_error"]
+        with session_scope() as s:
+            job = s.query(Job).filter(Job.job_type == "collect_source").one()
+            assert job.status == "queued" and job.run_after > queue.utcnow()
+        c.patch("/api/settings", json={"daily_http_request_limit": 20000})
+        card = [x for x in c.get("/api/sources").json() if x["id"] == src["id"]][0]
+        assert card["health"] == "ready"
+        with session_scope() as s:
+            assert s.query(Job).filter(Job.job_type == "collect_source").one().run_after <= queue.utcnow()

@@ -636,7 +636,7 @@ const VALUES: Record<string, [string, string]> = {
   open_access: ["open access", "وصول مفتوح"], open_license: ["open license", "ترخيص مفتوح"], paid: ["paid", "مدفوع"],
   unknown: ["unknown", "غير معروف"], restricted: ["restricted", "مقيد"], free_to_read: ["free to read", "مجاني القراءة"],
   public_domain: ["public domain", "ملك عام"],
-  ready: ["ready", "جاهز"], ok: ["ok", "سليم"], error: ["error", "خطأ"], needs_credentials: ["needs credentials", "يحتاج بيانات اعتماد"],
+  ready: ["ready", "جاهز"], ok: ["ok", "سليم"], error: ["error", "خطأ"], waiting: ["waiting (daily limit)", "بانتظار (الحد اليومي)"], needs_credentials: ["needs credentials", "يحتاج بيانات اعتماد"],
   deleted: ["deleted", "محذوف"], idle: ["idle", "خامل"],
   supported: ["supported", "مدعوم"], contested: ["contested", "محل خلاف"], gap: ["gap", "فجوة"], insufficient: ["insufficient", "غير كافٍ"],
   partial: ["partial", "جزئي"], sufficient: ["sufficient", "كافٍ"],
