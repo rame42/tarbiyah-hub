@@ -1044,4 +1044,6 @@ def spa(path: str):
     f = DIST / path
     if path and f.is_file() and DIST in f.resolve().parents:
         return FileResponse(f)
-    return FileResponse(index)
+    # never cache the page itself, so an update shows up without clearing the browser cache
+    # (the script/style files it loads have the version in their names)
+    return FileResponse(index, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

@@ -106,7 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "web":
         import uvicorn
 
-        uvicorn.run("tarbiyah.api.app:app", host=args.host, port=args.port, log_level="info")
+        uvicorn.run("tarbiyah.api.app:app", host=args.host, port=args.port, log_level="info",
+                        access_log=False, use_colors=False)  # one line per page request is noise
     elif args.cmd == "worker":
         from .jobs.worker import Worker
 
@@ -124,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             import uvicorn
 
-            uvicorn.run("tarbiyah.api.app:app", host=args.host, port=args.port, log_level="info")
+            uvicorn.run("tarbiyah.api.app:app", host=args.host, port=args.port, log_level="info",
+                        access_log=False, use_colors=False)  # one line per page request is noise
         finally:
             p.terminate()  # SIGTERM -> the worker finishes running jobs and stops cleanly
             p.join(60)
