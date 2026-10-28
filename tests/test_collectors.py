@@ -187,3 +187,45 @@ def test_social_adapters_parsing_and_credentials(env):
         assert not adapter.is_configured()
         with pytest.raises(NotConfigured):
             adapter.require()
+
+
+def test_youtube_channel_validation_and_full_history(env, monkeypatch):
+    from tarbiyah.config import get_config
+    from tarbiyah.sources import youtube
+    from tarbiyah.sources.base import CollectContext
+
+    a = youtube.YouTubeAdapter()
+    assert youtube.parse_channel("https://www.youtube.com/channel/UCcCfpDNl1Bi-LopV2noq_pg") == ("id", "UCcCfpDNl1Bi-LopV2noq_pg")
+    assert youtube.parse_channel("https://www.youtube.com/@SomeChannel") == ("handle", "@SomeChannel")
+    assert youtube.parse_playlist("https://www.youtube.com/playlist?list=PLabcdefghijkl") == "PLabcdefghijkl"
+    problems = a.config_problems({"channel_ids": ["UCcCfpDNl1Bi-LopV2noq_pg", "UCcccc...", "@Handle"]})
+    assert len(problems) == 2 and "UCcccc..." in problems[0] and "@Handle" in problems[1]
+
+    # with a key: uploads playlist (UC -> UU), newest page, then the back-catalogue in later runs
+    monkeypatch.setenv("YOUTUBE_API_KEY", "k")
+    get_config.cache_clear()
+    assert a.config_problems({"channel_ids": ["@Handle"]}) == []
+    monkeypatch.setattr(youtube, "fetch_transcript", lambda vid: ([], None, False))
+    pages = {None: ([f"v{i:010d}" for i in range(0, 50)], "p2"), "p2": ([f"v{i:010d}" for i in range(50, 100)], "p3"),
+             "p3": ([f"v{i:010d}" for i in range(100, 130)], None)}
+    calls = []
+
+    def fake_api(path, **params):
+        calls.append((path, params))
+        if path == "channels":
+            return {"items": [{"id": "UCcCfpDNl1Bi-LopV2noq_pg"}]}
+        assert params["playlistId"] == "UUcCfpDNl1Bi-LopV2noq_pg"
+        ids, nxt = pages[params.get("pageToken")]
+        return {"items": [{"snippet": {"title": f"Lesson {v}", "channelTitle": "Ch", "publishedAt": "2025-01-01T00:00:00Z"},
+                           "contentDetails": {"videoId": v}} for v in ids], **({"nextPageToken": nxt} if nxt else {})}
+
+    monkeypatch.setattr(a, "_api", fake_api)
+    state: dict = {}
+    cfg = {"channel_ids": ["@Handle"], "max_videos_per_run": 60}
+    run1 = list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state)))
+    assert len(run1) == 100 and run1[0].url == "https://www.youtube.com/watch?v=v0000000000"
+    assert state["handles"] == {"@Handle": "UCcCfpDNl1Bi-LopV2noq_pg"}
+    run2 = list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state)))
+    assert len(run2) == 30 and state["backfill"]["UUcCfpDNl1Bi-LopV2noq_pg"]["done"] is True
+    assert list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state))) == []
+    assert sum(1 for c in calls if c[0] == "channels") == 1

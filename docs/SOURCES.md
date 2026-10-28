@@ -51,11 +51,22 @@ Leave it `false` otherwise. Documents are then catalogued with their link, unles
 ```
 Podcast episodes with a published transcript (`<podcast:transcript>`) are collected with timestamps.
 
-**YouTube channels** (no key needed)
+**YouTube channels**
 ```json
-{"channel_ids": ["UCxxxxxxxxxxxxxxxxxxxxxx"], "playlist_ids": [], "transcripts": true}
+{"channel_ids": ["UCxxxxxxxxxxxxxxxxxxxxxx", "@SomeHandle", "https://www.youtube.com/channel/UC..."],
+ "playlist_ids": ["PL..."], "transcripts": true, "full_history": true, "max_videos_per_run": 100}
 ```
-Find a channel ID in the channel's page source (`"channelId"`) or its "About" > Share > Copy channel ID.
+- A channel ID starts with `UC` and is 24 characters long (channel page > About > Share channel > Copy channel ID).
+  Wrong IDs are refused when you save the source.
+- Without `YOUTUBE_API_KEY`: only the **newest 15 videos** of each channel (YouTube's public feed), then
+  each new upload. @handles need the key.
+- With `YOUTUBE_API_KEY`: the newest 50, then the **older videos too**, `max_videos_per_run` per run,
+  until the whole channel is collected (1 quota unit per 50 videos; the free quota is 10,000 a day).
+- Videos are never downloaded. Each item has the title, description, channel, date, link and the
+  captions when the channel or YouTube published them (searchable, with timestamps that open the
+  video at that moment).
+- The key also turns on the built-in **YouTube** search source (the one that existed before you added yours): the research agent searches all of
+  YouTube by topic, so videos from other channels appear too. Disable that source if you only want your channels.
 
 **Telegram public channels**
 ```json
