@@ -5,15 +5,18 @@ All are free to query. Files are downloaded only when an open licence is reporte
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from ..config import get_config
-from ..http import http
+from ..http import FetchError, http
 from ..ingest.licensing import AccessDecision, decide
 from ..ingest.registry import ResourceIn
 from ..settings import get_setting
 from .base import AdapterInfo, SourceAdapter, as_year, first
+
+log = logging.getLogger(__name__)
 
 TYPE_MAP = {
     "article": "paper", "journal-article": "paper", "book": "book", "monograph": "book", "edited-book": "book",
@@ -97,7 +100,7 @@ class OpenAlexAdapter(SourceAdapter):
             params["filter"] = f"language:{lang}"
         if get_config().contact_email:
             params["mailto"] = get_config().contact_email
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(w) for w in data.get("results", [])]
 
     def fetch_works(self, ids: list[str]) -> list[ResourceIn]:
@@ -106,7 +109,7 @@ class OpenAlexAdapter(SourceAdapter):
         if not short:
             return []
         params = {"filter": "openalex:" + "|".join(short), "per-page": 50}
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(w) for w in data.get("results", [])]
 
 
@@ -164,7 +167,7 @@ class CrossrefAdapter(SourceAdapter):
         params: dict[str, Any] = {"query": query, "rows": min(limit, 50)}
         if get_config().contact_email:
             params["mailto"] = get_config().contact_email
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(it) for it in (data.get("message") or {}).get("items", [])]
 
 
@@ -179,6 +182,7 @@ class DoajAdapter(SourceAdapter):
         default_enabled=True, min_interval_seconds=1.0,
     )
     BASE = "https://doaj.org/api/search/articles/"
+    BASE_V4 = "https://doaj.org/api/v4/search/articles/"
 
     def parse(self, item: dict[str, Any]) -> ResourceIn:
         b = item.get("bibjson") or {}
@@ -218,11 +222,41 @@ class DoajAdapter(SourceAdapter):
         )
 
     def search(self, query: str, lang: str | None, limit: int) -> list[ResourceIn]:
+        """DOAJ's own API first. Some networks get HTTP 403 from DOAJ's firewall; then the same DOAJ journals
+        are searched through OpenAlex, which indexes every DOAJ journal (filter is_in_doaj)."""
         from urllib.parse import quote
 
-        data = http().get_json(self.BASE + quote(query), params={"pageSize": min(limit, 50)},
-                               min_interval=self.info.min_interval_seconds)
-        return [self.parse(i) for i in data.get("results", [])]
+        cfg = get_config()
+        headers = {"User-Agent": "TarbiyahHub/0.2 (research library; "
+                                 + (f"mailto:{cfg.contact_email})" if cfg.contact_email else "non-commercial)")}
+        last: FetchError | None = None
+        for base in (self.BASE, self.BASE_V4):
+            try:
+                data = http().get_json(base + quote(query, safe=""), params={"pageSize": min(limit, 50)},
+                                       headers=headers, min_interval=self.info.min_interval_seconds,
+                                       check_robots=False)
+                return [self.parse(i) for i in data.get("results", [])]
+            except FetchError as e:
+                if e.status not in (400, 403, 404):
+                    raise
+                last = e
+        log.warning("DOAJ API refused the request (%s); searching DOAJ journals through OpenAlex", last)
+        return self.via_openalex(query, lang, limit)
+
+    def via_openalex(self, query: str, lang: str | None, limit: int) -> list[ResourceIn]:
+        oa = OpenAlexAdapter()
+        flt = "primary_location.source.is_in_doaj:true" + (f",language:{lang}" if lang in ("ar", "en") else "")
+        params: dict[str, Any] = {"search": query, "per-page": min(limit, 50), "filter": flt}
+        if get_config().contact_email:
+            params["mailto"] = get_config().contact_email
+        data = http().get_json(oa.BASE, params=params, min_interval=oa.info.min_interval_seconds, check_robots=False)
+        out = []
+        for w in data.get("results", []):
+            d = oa.parse(w)
+            d.source_key = "doaj"
+            d.extra = {**d.extra, "via": "openalex (DOAJ journal)"}
+            out.append(d)
+        return out
 
 
 # ---------------------------------------------------------------------------- ERIC
@@ -272,7 +306,7 @@ class EricAdapter(SourceAdapter):
     def search(self, query: str, lang: str | None, limit: int) -> list[ResourceIn]:
         data = http().get_json(self.BASE, params={"search": query, "format": "json", "rows": min(limit, 50),
                                                    "fields": self.FIELDS},
-                               min_interval=self.info.min_interval_seconds)
+                               min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(d) for d in (data.get("response") or {}).get("docs", [])]
 
 
@@ -321,5 +355,5 @@ class CoreAdapter(SourceAdapter):
         q = query if not lang else f"({query}) AND language.code:{lang}"
         data = http().get_json(self.BASE, params={"q": q, "limit": min(limit, 50)},
                                headers={"Authorization": f"Bearer {get_config().core_api_key}"},
-                               min_interval=self.info.min_interval_seconds)
+                               min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(w) for w in data.get("results", [])]

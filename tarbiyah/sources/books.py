@@ -80,13 +80,13 @@ class InternetArchiveAdapter(SourceAdapter):
             q += " AND language:(English OR eng)"
         params: list[tuple[str, Any]] = [("q", q), ("rows", min(limit, 50)), ("output", "json")]
         params += [("fl[]", f) for f in self.FIELDS]
-        data = http().get_json(self.SEARCH, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.SEARCH, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(d) for d in (data.get("response") or {}).get("docs", [])]
 
     @staticmethod
     def resolve_download(identifier: str) -> tuple[str, str] | None:
         """Pick the best file of an item: PDF > EPUB > plain text. Returns (url, format)."""
-        meta = http().get_json(f"https://archive.org/metadata/{quote(identifier)}")
+        meta = http().get_json(f"https://archive.org/metadata/{quote(identifier)}", check_robots=False)
         files = meta.get("files") or []
         prefs = [("Text PDF", "pdf"), ("PDF", "pdf"), ("EPUB", "epub"), ("DjVuTXT", "txt")]
         for fmt, kind in prefs:
@@ -139,7 +139,7 @@ class OpenLibraryAdapter(SourceAdapter):
                                             "ebook_access,ia,publisher,subject,edition_count"}
         if lang == "ar":
             params["language"] = "ara"
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(d) for d in data.get("docs", [])]
 
 
@@ -179,7 +179,7 @@ class GutendexAdapter(SourceAdapter):
         params = {"search": query}
         if lang in ("ar", "en"):
             params["languages"] = lang
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(b) for b in data.get("results", [])][:limit]
 
 
@@ -234,5 +234,5 @@ class GoogleBooksAdapter(SourceAdapter):
         params: dict[str, Any] = {"q": query, "maxResults": min(limit, 40), "printType": "books"}
         if lang in ("ar", "en"):
             params["langRestrict"] = lang
-        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds)
+        data = http().get_json(self.BASE, params=params, min_interval=self.info.min_interval_seconds, check_robots=False)
         return [self.parse(i) for i in data.get("items", []) or []]

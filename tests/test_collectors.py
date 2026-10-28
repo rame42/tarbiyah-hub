@@ -262,3 +262,38 @@ def test_youtube_single_video_links(env, monkeypatch):
     assert d.title == "Raising children" and d.channel == "Some Channel" and d.resource_type == "video"
     assert d.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" and d.segments and d.extra["transcript"] is True
     assert list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state))) == []
+
+
+def test_doaj_403_falls_back_to_doaj_journals_in_openalex(env, monkeypatch):
+    from tarbiyah.http import FetchError
+    from tarbiyah.sources import academic
+
+    calls = []
+
+    class FakeHttp:
+        def get_json(self, url, **kw):
+            calls.append((url, kw))
+            if "doaj.org" in url:
+                assert kw["check_robots"] is False and "crawler" not in kw["headers"]["User-Agent"]
+                raise FetchError(f"HTTP 403 for {url}", status=403)
+            assert "is_in_doaj:true" in kw["params"]["filter"]
+            return {"results": [{"id": "https://openalex.org/W1", "display_name": "Family cohesion among Muslim youth",
+                                 "type": "article", "publication_year": 2024, "doi": "https://doi.org/10.1/x",
+                                 "open_access": {"is_oa": True, "oa_status": "gold"},
+                                 "primary_location": {"landing_page_url": "https://journal.example/a",
+                                                      "license": "cc-by", "source": {"display_name": "J. Ed"}}}]}
+
+    monkeypatch.setattr(academic, "http", lambda: FakeHttp())
+    out = academic.DoajAdapter().search("family cohesion immigrant Muslim youth", "en", 10)
+    assert len(out) == 1 and out[0].source_key == "doaj" and out[0].extra["via"].startswith("openalex")
+    assert out[0].access.access_status == "open_license"
+    assert [c[0] for c in calls][:2] == ["https://doaj.org/api/search/articles/family%20cohesion%20immigrant%20Muslim%20youth",
+                                         "https://doaj.org/api/v4/search/articles/family%20cohesion%20immigrant%20Muslim%20youth"]
+
+    class Down(FakeHttp):
+        def get_json(self, url, **kw):
+            raise FetchError("HTTP 500", status=500)
+
+    monkeypatch.setattr(academic, "http", lambda: Down())
+    with pytest.raises(FetchError):  # a real outage is reported, not hidden
+        academic.DoajAdapter().search("x", None, 5)
