@@ -76,18 +76,6 @@ def main(argv: list[str] | None = None) -> int:
     io.add_argument("folder", nargs="+")  # a path with spaces may arrive in pieces
     args = ap.parse_args(argv)
 
-    _setup_logging()
-    if args.cmd == "test-ai":
-        from .aitest import run
-
-        return 0 if run() else 1
-    if args.cmd == "update":  # replaces program files only; runs before the app is loaded
-        from .updater import check, update_logged
-
-        if args.check:
-            print(json.dumps(check(), indent=2))
-            return 0
-        return 0 if update_logged(args.zip) else 1
     if args.cmd == "import-old":  # must run before the database is opened
         from .import_old import import_old
 
@@ -102,6 +90,18 @@ def main(argv: list[str] | None = None) -> int:
         init_app()  # upgrades the copied database to this version
         print("The library is ready. Double-click start.bat.")
         return 0
+    _setup_logging()  # after import-old: on Windows an open log file inside data/ blocks moving that folder
+    if args.cmd == "test-ai":
+        from .aitest import run
+
+        return 0 if run() else 1
+    if args.cmd == "update":  # replaces program files only; runs before the app is loaded
+        from .updater import check, update_logged
+
+        if args.check:
+            print(json.dumps(check(), indent=2))
+            return 0
+        return 0 if update_logged(args.zip) else 1
     if args.cmd == "restore":  # must run before the database is opened
         from .backup import restore
 

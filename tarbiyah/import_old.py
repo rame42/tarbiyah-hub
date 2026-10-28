@@ -98,7 +98,13 @@ def import_old(given: str | Path, out=print) -> dict:
         while aside.exists():
             n += 1
             aside = new_data.with_name(f"data-before-import-{stamp}-{n}")
-        new_data.rename(aside)
+        try:
+            new_data.rename(aside)
+        except PermissionError as e:
+            raise RuntimeError(
+                "Windows says a file in this folder's 'data' folder is in use. Close the Tarbiyah Hub windows of "
+                "THIS folder (the black worker/dashboard windows on the taskbar) and any File Explorer window showing "
+                f"the data folder, then try again. ({e})") from e
         kept.append(aside.name)
     out(f"Copying {need / 1024 ** 2:.0f} MB (database and files); this can take a while...")
     shutil.copytree(old_data, new_data, ignore=shutil.ignore_patterns("*.pid", "stop-*", "*.lock"))
