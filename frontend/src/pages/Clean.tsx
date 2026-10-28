@@ -50,7 +50,7 @@ export default function Clean() {
           <>
             <Overview d={d} />
             <SortStep d={d} reload={state.reload} />
-            <ArchiveStep below={below} setBelow={setBelow} reload={state.reload} />
+            <ArchiveStep sources={d.sources} below={below} setBelow={setBelow} reload={state.reload} />
             <QualityStep d={d} reload={state.reload} />
             <TeachStep d={d} reload={state.reload} />
             <SourcesStep d={d} reload={state.reload} />
@@ -126,18 +126,19 @@ function SortStep({ d, reload }: { d: Summary; reload: () => void }) {
   );
 }
 
-function ArchiveStep({ below, setBelow, reload }: { below: number; setBelow: (n: number) => void; reload: () => void }) {
+function ArchiveStep({ sources, below, setBelow, reload }: { sources: Summary["sources"]; below: number; setBelow: (n: number) => void; reload: () => void }) {
   const { t } = useI18n();
   const [onlyUnc, setOnlyUnc] = useState(false);
+  const [source, setSource] = useState("");
   const [preview, setPreview] = useState<{ would_archive: number; examples: { id: number; title: string; relevance: number }[] } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { setPreview(null); setMsg(null); }, [below, onlyUnc]);
+  useEffect(() => { setPreview(null); setMsg(null); }, [below, onlyUnc, source]);
   const call = async (dry: boolean) => {
     setErr(null);
     try {
       const r = await api.post<{ would_archive?: number; archived?: number; examples?: { id: number; title: string; relevance: number }[] }>(
-        "/api/curation/archive-low", { below, dry_run: dry, only_unclassified: onlyUnc });
+        "/api/curation/archive-low", { below, dry_run: dry, only_unclassified: onlyUnc, source: source || null });
       if (dry) setPreview({ would_archive: r.would_archive || 0, examples: r.examples || [] });
       else { setPreview(null); setMsg(`${t("archived_n")} ${fmtNum(r.archived || 0)}`); reload(); }
     } catch (e) { setErr((e as Error).message); }
@@ -151,6 +152,11 @@ function ArchiveStep({ below, setBelow, reload }: { below: number; setBelow: (n:
           <input type="number" min={1} max={100} value={below} onChange={(e) => setBelow(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
         </label>
         <label className="check"><input type="checkbox" checked={onlyUnc} onChange={(e) => setOnlyUnc(e.target.checked)} />{t("only_unclassified")}</label>
+        <label className="field inline-field"><span>{t("source")}</span>
+          <select value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="">{t("any")}</option>
+            {sources.filter((s) => s.key).map((s) => <option key={s.key!} value={s.key!}>{s.name} ({fmtNum(s.items)})</option>)}
+          </select></label>
         <button type="button" className="btn" onClick={() => call(true)}>{t("preview")}</button>
       </div>
       <ErrorBox error={err} />

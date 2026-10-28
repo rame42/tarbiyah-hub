@@ -297,3 +297,17 @@ def test_doaj_403_falls_back_to_doaj_journals_in_openalex(env, monkeypatch):
     monkeypatch.setattr(academic, "http", lambda: Down())
     with pytest.raises(FetchError):  # a real outage is reported, not hidden
         academic.DoajAdapter().search("x", None, 5)
+
+
+def test_crawler_keywords_focus(env):
+    from types import SimpleNamespace as NS
+
+    from tarbiyah.sources.web import _matches_keywords
+
+    cfg = {"keywords": ["تربية", "اولاد", "طفل", "معلم"]}
+    assert _matches_keywords(cfg, NS(title="تربيةُ الأولادِ في الإسلام", description="", full_text=""))
+    assert _matches_keywords(cfg, NS(title="آداب المعلّم والمتعلّم", description="", full_text=""))
+    assert not _matches_keywords(cfg, NS(title="ديوان المتنبي", description="شعر", full_text="... الطفل ..."))
+    assert _matches_keywords({**cfg, "keywords_in": "text"}, NS(title="ديوان", description="", full_text="عن الطفل"))
+    assert not _matches_keywords({"keywords": ["طفل"], "keywords_in": "title"},
+                                 NS(title="كتاب", description="في الطفل", full_text=""))

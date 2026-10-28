@@ -54,6 +54,23 @@ def _in_domains(url: str, domains: list[str]) -> bool:
     return any(d == x or d.endswith("." + x) for x in domains)
 
 
+def _matches_keywords(cfg: dict[str, Any], ex: Any) -> bool:
+    """Focus a site on your topics: keep a page only if one of `keywords` appears in its title
+    (and description, or the whole text with keywords_in="text"). Arabic spelling variants match."""
+    from ..text.arabic import normalize_for_search
+
+    where = cfg.get("keywords_in") or "title_description"
+    parts = [ex.title or ""]
+    if where in ("title_description", "text"):
+        parts.append(ex.description or "")
+    if where == "text":
+        parts.append((ex.full_text or "")[:20000])
+    hay = " " + normalize_for_search(" ".join(parts)) + " "
+    words = cfg.get("keywords")
+    words = [words] if isinstance(words, str) else words
+    return any(normalize_for_search(str(k)).strip() and normalize_for_search(str(k)).strip() in hay for k in words)
+
+
 def render_with_playwright(url: str, timeout_ms: int = 30000) -> str:
     """Render a JavaScript page. Requires `pip install playwright` + `playwright install chromium`."""
     from playwright.sync_api import sync_playwright
@@ -100,6 +117,8 @@ class WebCrawlerAdapter(SourceAdapter):
             "resource_type": "Type for saved pages", "download_documents": "Permission to store site files",
             "render_js": "Render with Playwright", "language": "Language hint",
             "only_courses": "Keep only course pages (for course catalogues: true/false)",
+            "keywords": "Keep only pages whose title/description contains one of these words (focus a big site)",
+            "keywords_in": "Where to look for keywords: title | title_description (default) | text",
         },
         default_config={"start_urls": [], "max_depth": 3, "use_sitemap": True, "recrawl_hours": 168,
                         "min_text_chars": 400, "resource_type": "article", "download_documents": False,
@@ -293,6 +312,8 @@ class WebCrawlerAdapter(SourceAdapter):
             return
         if not (first_time or changed):
             return
+        if cfg.get("keywords") and not _matches_keywords(cfg, ex):
+            return  # off-topic page: not saved (its links were still followed)
         lang = cfg.get("language") or ex.language
         d = ResourceIn(
             title=ex.title or url,

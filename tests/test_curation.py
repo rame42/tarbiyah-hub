@@ -86,6 +86,8 @@ def test_relevance_archive_and_cleanup(env, fixtures_dir):
         assert c.get("/api/resources", params={"pillar": "none"}).json()["total"] == summ["unclassified"]
         assert c.get("/api/resources", params={"sort": "relevance_low"}).json()["results"][0]["resource"]["id"] == ids[1]
         # clean-up: preview, then archive everything below 20
+        assert c.post("/api/curation/archive-low", json={"below": 20, "dry_run": True, "source": "shamela"}).json()["would_archive"] == 0
+        assert c.post("/api/curation/archive-low", json={"below": 20, "dry_run": True, "source": "openalex"}).json()["would_archive"] >= 1
         prev = c.post("/api/curation/archive-low", json={"below": 20, "dry_run": True}).json()
         assert prev["would_archive"] >= 1 and any(e["id"] == ids[1] for e in prev["examples"])
         assert c.post("/api/curation/archive-low", json={"below": 20, "dry_run": False}).json()["archived"] >= 1
