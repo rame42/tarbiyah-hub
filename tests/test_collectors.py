@@ -229,3 +229,36 @@ def test_youtube_channel_validation_and_full_history(env, monkeypatch):
     assert len(run2) == 30 and state["backfill"]["UUcCfpDNl1Bi-LopV2noq_pg"]["done"] is True
     assert list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state))) == []
     assert sum(1 for c in calls if c[0] == "channels") == 1
+
+
+def test_youtube_single_video_links(env, monkeypatch):
+    from tarbiyah.sources import youtube
+    from tarbiyah.sources.base import CollectContext
+
+    a = youtube.YouTubeAdapter()
+    assert youtube.classify_link("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=5") == ("video", "dQw4w9WgXcQ")
+    assert youtube.classify_link("https://youtu.be/dQw4w9WgXcQ") == ("video", "dQw4w9WgXcQ")
+    assert youtube.classify_link("https://www.youtube.com/shorts/dQw4w9WgXcQ") == ("video", "dQw4w9WgXcQ")
+    assert youtube.classify_link("https://www.youtube.com/playlist?list=PLabcdefghijkl") == ("playlist", "PLabcdefghijkl")
+    # video links pasted into channel_ids are accepted too
+    assert a.config_problems({"channel_ids": ["https://youtu.be/dQw4w9WgXcQ"]}) == []
+    assert a.config_problems({"video_urls": "https://youtu.be/dQw4w9WgXcQ"})  # not a list
+    assert a.config_problems({"video_urls": ["hello"]})
+
+    monkeypatch.setattr(youtube, "fetch_transcript",
+                        lambda vid: ([{"text": "patience with children", "timestamp": 0.0}], "en", False))
+
+    class FakeHttp:
+        def get_json(self, url, **kw):
+            assert url.endswith("/oembed")
+            return {"title": "Raising children", "author_name": "Some Channel"}
+
+    monkeypatch.setattr(youtube, "http", lambda: FakeHttp())
+    state: dict = {}
+    cfg = {"video_urls": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/dQw4w9WgXcQ"]}
+    out = list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state)))
+    assert len(out) == 1
+    d = out[0]
+    assert d.title == "Raising children" and d.channel == "Some Channel" and d.resource_type == "video"
+    assert d.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ" and d.segments and d.extra["transcript"] is True
+    assert list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state))) == []

@@ -56,6 +56,9 @@ Podcast episodes with a published transcript (`<podcast:transcript>`) are collec
 {"channel_ids": ["UCxxxxxxxxxxxxxxxxxxxxxx", "@SomeHandle", "https://www.youtube.com/channel/UC..."],
  "playlist_ids": ["PL..."], "transcripts": true, "full_history": true, "max_videos_per_run": 100}
 ```
+- Single videos: put the links in `"video_urls": ["https://www.youtube.com/watch?v=...", "https://youtu.be/..."]`.
+  Every list accepts every kind of YouTube link (video, Short, channel, @handle, playlist), so a link in
+  the "wrong" list still works. Lists need square brackets and quotes: `["link1", "link2"]`.
 - A channel ID starts with `UC` and is 24 characters long (channel page > About > Share channel > Copy channel ID).
   Wrong IDs are refused when you save the source.
 - Without `YOUTUBE_API_KEY`: only the **newest 15 videos** of each channel (YouTube's public feed), then

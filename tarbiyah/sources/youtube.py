@@ -42,6 +42,26 @@ def parse_channel(value: str) -> tuple[str, str] | None:
     return None
 
 
+def classify_link(value: str) -> tuple[str, str] | None:
+    """Any YouTube link or ID -> ('video'|'channel'|'handle'|'playlist', value); None if unusable.
+    People paste whatever they have, so every list in the source config accepts every kind."""
+    v = str(value or "").strip()
+    if re.search(r"youtu\.be/|/watch\?|/shorts/|/live/|/embed/", v):
+        vid = video_id_from_url(v)
+        return ("video", vid) if vid else None
+    if re.search(r"[?&]list=", v):
+        pid = parse_playlist(v)
+        return ("playlist", pid) if pid else None
+    ch = parse_channel(v)
+    if ch:
+        return ("channel" if ch[0] == "id" else "handle", ch[1])
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", v):
+        return "video", v
+    if re.fullmatch(r"(PL|UU|OL|FL)[A-Za-z0-9_-]{10,62}", v):
+        return "playlist", v
+    return None
+
+
 def parse_playlist(value: str) -> str | None:
     v = str(value or "").strip()
     m = re.search(r"[?&]list=([A-Za-z0-9_-]+)", v)
@@ -90,36 +110,68 @@ class YouTubeAdapter(SourceAdapter):
         optional_credentials=("YOUTUBE_API_KEY",),
         access_notes="Channel monitoring works without credentials. Search needs a free YouTube Data API key. "
                      "Video files are never downloaded; only metadata and available captions.",
-        default_schedule_minutes=720, min_interval_seconds=1.0, required_config=(("channel_ids", "playlist_ids"),),
+        default_schedule_minutes=720, min_interval_seconds=1.0,
+        required_config=(("channel_ids", "playlist_ids", "video_urls"),),
         config_fields={"channel_ids": "List of channels: IDs (UC...), @handles or channel links",
                        "playlist_ids": "List of playlist IDs or playlist links",
+                       "video_urls": "List of single video links (youtube.com/watch?v=..., youtu.be/..., Shorts)",
                        "transcripts": "Collect captions (true/false)", "language": "Language hint",
                        "full_history": "With an API key: also collect older videos, not just the newest (true/false)",
                        "max_videos_per_run": "With an API key: older videos added per run per channel (default 100)"},
-        default_config={"channel_ids": [], "playlist_ids": [], "transcripts": True, "full_history": True,
+        default_config={"channel_ids": [], "playlist_ids": [], "video_urls": [], "transcripts": True, "full_history": True,
                         "max_videos_per_run": 100},
     )
 
     def config_problems(self, cfg: dict[str, Any]) -> list[str]:
         problems = super().config_problems(cfg)
         has_key = bool(get_config().youtube_api_key)
-        for c in cfg.get("channel_ids") or []:
-            parsed = parse_channel(c)
-            if parsed is None:
-                problems.append(f'YouTube: "{c}" is not a channel. Use the channel ID (starts with UC, 24 characters, '
-                                f'e.g. UCcCfpDNl1Bi-LopV2noq_pg), the @handle, or the channel link.')
-            elif parsed[0] == "handle" and not has_key:
-                problems.append(f'YouTube: "{c}" is a @handle; turning it into a channel needs YOUTUBE_API_KEY. '
-                                f'Without a key, use the channel ID (UC...) instead.')
-        for p in cfg.get("playlist_ids") or []:
-            if parse_playlist(p) is None:
-                problems.append(f'YouTube: "{p}" is not a playlist ID or playlist link.')
+        for key in ("channel_ids", "playlist_ids", "video_urls"):
+            items = cfg.get(key) or []
+            if isinstance(items, str):
+                problems.append(f'YouTube: "{key}" must be a list in square brackets, e.g. ["{items}"]')
+                continue
+            for c in items:
+                kind = classify_link(c)
+                if kind is None:
+                    problems.append(f'YouTube: "{c}" is not a YouTube video, channel or playlist link. A channel ID '
+                                    f'starts with UC and is 24 characters long (e.g. UCcCfpDNl1Bi-LopV2noq_pg).')
+                elif kind[0] == "handle" and not has_key:
+                    problems.append(f'YouTube: "{c}" is a @handle; turning it into a channel needs YOUTUBE_API_KEY. '
+                                    f'Without a key, use the channel ID (UC...) instead.')
         return problems
 
     # ------------------------------------------------------------------ Data API helpers (need a key)
     def _api(self, path: str, **params: Any) -> dict[str, Any]:
         return http().get_json(f"{API}/{path}", params={**params, "key": get_config().youtube_api_key},
                                check_robots=False)
+
+    def _videos(self, ids: list[str], ctx: CollectContext, cfg: dict[str, Any]) -> Iterator[ResourceIn]:
+        """Single videos: details from the Data API (key) or YouTube's public oEmbed (title and channel only)."""
+        key = get_config().youtube_api_key
+        for i in range(0, len(ids), 50):
+            if ctx.should_stop():
+                return
+            batch = ids[i:i + 50]
+            info: dict[str, dict[str, Any]] = {}
+            if key:
+                try:
+                    for it in self._api("videos", part="snippet", id=",".join(batch)).get("items") or []:
+                        info[it["id"]] = it.get("snippet") or {}
+                except FetchError as e:
+                    ctx.log(f"YouTube API failed for videos ({e}); using oEmbed")
+            for vid in batch:
+                sn = info.get(vid)
+                if sn is None:
+                    try:
+                        o = http().get_json("https://www.youtube.com/oembed", check_robots=False,
+                                            params={"url": f"https://www.youtube.com/watch?v={vid}", "format": "json"})
+                        sn = {"title": o.get("title"), "channelTitle": o.get("author_name")}
+                    except FetchError as e:
+                        ctx.log(f"YouTube: video {vid} not found or private ({e})")
+                        continue
+                yield self._resource(vid, sn.get("title", ""), sn.get("description", ""), sn.get("channelTitle"),
+                                     sn.get("publishedAt"), ctx.source_key, ctx.source_id, bool(cfg.get("transcripts")),
+                                     cfg.get("language"))
 
     def _resolve_handle(self, handle: str, ctx: CollectContext) -> str | None:
         cache = ctx.state.setdefault("handles", {})
@@ -219,15 +271,22 @@ class YouTubeAdapter(SourceAdapter):
 
     def collect(self, ctx: CollectContext) -> Iterator[ResourceIn]:
         cfg = {**self.info.default_config, **(ctx.source_config or {})}
-        if not (cfg.get("channel_ids") or cfg.get("playlist_ids")):
-            raise ValueError("YouTube source has no channel_ids or playlist_ids configured.")
+        entries = [e for k in ("channel_ids", "playlist_ids", "video_urls")
+                   for e in ([cfg.get(k)] if isinstance(cfg.get(k), str) else cfg.get(k) or [])]
+        if not entries:
+            raise ValueError("YouTube source has no channel_ids, playlist_ids or video_urls configured.")
         has_key = bool(get_config().youtube_api_key)
         targets: list[tuple[str, str]] = []
-        for c in cfg.get("channel_ids") or []:
-            parsed = parse_channel(c)
+        videos: list[str] = []
+        for c in entries:
+            parsed = classify_link(c)
             if parsed is None:
-                ctx.log(f'YouTube: skipped "{c}": not a channel ID, @handle or channel link')
-            elif parsed[0] == "id":
+                ctx.log(f'YouTube: skipped "{c}": not a YouTube video, channel or playlist link')
+            elif parsed[0] == "video":
+                videos.append(parsed[1])
+            elif parsed[0] == "playlist":
+                targets.append(("playlist_id", parsed[1]))
+            elif parsed[0] == "channel":
                 targets.append(("channel_id", parsed[1]))
             elif not has_key:
                 ctx.log(f'YouTube: skipped "{c}": @handles need YOUTUBE_API_KEY; use the UC... channel ID')
@@ -239,15 +298,14 @@ class YouTubeAdapter(SourceAdapter):
                     cid = None
                 if cid:
                     targets.append(("channel_id", cid))
-        for p in cfg.get("playlist_ids") or []:
-            pid = parse_playlist(p)
-            if pid:
-                targets.append(("playlist_id", pid))
-            else:
-                ctx.log(f'YouTube: skipped "{p}": not a playlist ID')
-        if not targets:
-            raise ValueError("None of the YouTube channels/playlists in this source are valid (see the log).")
+        if not targets and not videos:
+            raise ValueError("None of the YouTube links in this source are valid: " + "; ".join(str(e) for e in entries[:5]))
         seen = set(ctx.state.get("seen_ids", []))
+        new_videos = [v for v in dict.fromkeys(videos) if v not in seen]
+        for d in self._videos(new_videos, ctx, cfg):
+            seen.add(d.external_id)
+            ctx.state["seen_ids"] = list(seen)[-20000:]
+            yield d
         for param, value in targets:
             if ctx.should_stop():
                 break
