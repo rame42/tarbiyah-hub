@@ -122,3 +122,13 @@ def test_relevance_archive_and_cleanup(env, fixtures_dir):
         r = s.get(Resource, ids[2])
         set_relevance(s, r, 90)
         assert r.relevance == 90
+
+
+def test_new_items_get_pillars_immediately(env):
+    with session_scope() as s:
+        r, created = register_with_content(s, ResourceIn(
+            title="تربية الأطفال على الصدق في البيت", url="https://ex.org/new", resource_type="paper",
+            description="Raising children and parenting in the Muslim family.", access=decide(None),
+            collection_method="api", source_key="crossref"))
+        assert created and r.processing_status == "pending"  # not processed yet...
+        assert {p.pillar for p in r.pillars} >= {"children"} and r.relevance > 0  # ...but already sorted

@@ -67,7 +67,19 @@ def register_with_content(session: Session, d: ResourceIn) -> tuple[Resource, bo
         if r.acquisition_status == "metadata_only":
             r.acquisition_status = "text_collected"  # page/post/transcript text collected; no file stored
             r.collected_at = utcnow()
+    if created:
+        quick_classify(session, r)
     return r, created
+
+
+def quick_classify(session: Session, r: Resource) -> None:
+    """Sort a new item into pillars right away from its title and description (no web request), so it is
+    not "unclassified" while it waits for processing; processing later refines it with the full text."""
+    try:
+        session.flush()
+        apply_classification(session, r, classify_text(session, r.title, r.description or "", "", r.keywords))
+    except Exception:  # noqa: BLE001 - never block collection; processing classifies again
+        log.exception("quick classification failed for resource %s", r.id)
 
 
 # ------------------------------------------------------------------ local import
