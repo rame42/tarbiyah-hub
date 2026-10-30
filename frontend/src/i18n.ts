@@ -137,6 +137,8 @@ const D = {
   keys_social: ["Social media (optional)", "وسائل التواصل (اختياري)"],
   keys_other: ["Other", "أخرى"],
   key_saved: ["saved", "محفوظ"],
+  key_remove: ["Remove", "إزالة"],
+  key_will_remove: ["Will be removed when you click Save", "سيُزال عند الضغط على حفظ"],
   key_keep: ["Saved: leave empty to keep it", "محفوظ: اتركه فارغاً للإبقاء عليه"],
   key_paste: ["Paste the key here", "ألصق المفتاح هنا"],
   keys_saved: ["Saved", "تم الحفظ"],

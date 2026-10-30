@@ -299,7 +299,11 @@ function KeysCard() {
                 <div className="form-grid keys-grid">
                   {d.fields.filter((f) => f.group === g).map((f) => (
                     <label key={f.key} title={f.key}>
-                      <span>{f.label} {f.secret && f.is_set ? <span className="badge badge-good">{t("key_saved")} {f.value}</span> : null}</span>
+                      <span>{f.label} {f.secret && f.is_set ? <>
+                        <span className="badge badge-good">{t("key_saved")} {f.value}</span>{" "}
+                        <button type="button" className="btn btn-small btn-ghost"
+                          onClick={() => setDraft({ ...draft, [f.key]: "__clear__" })}>{draft[f.key] === "__clear__" ? t("key_will_remove") : t("key_remove")}</button>
+                      </> : null}</span>
                       {f.choices ? (
                         <select value={draft[f.key] ?? f.value} onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}>
                           {!f.value ? <option value="">—</option> : null}
@@ -308,7 +312,7 @@ function KeysCard() {
                       ) : (
                         <input type={f.secret ? "password" : "text"} dir="ltr" autoComplete="off" spellCheck={false}
                           placeholder={f.secret ? (f.is_set ? t("key_keep") : t("key_paste")) : ""}
-                          value={draft[f.key] ?? (f.secret ? "" : f.value)}
+                          value={draft[f.key] === "__clear__" ? "" : draft[f.key] ?? (f.secret ? "" : f.value)}
                           onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })} />
                       )}
                       {f.help ? <span className="small muted">{f.help}</span> : null}
