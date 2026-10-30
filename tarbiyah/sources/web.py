@@ -54,6 +54,14 @@ def _in_domains(url: str, domains: list[str]) -> bool:
     return any(d == x or d.endswith("." + x) for x in domains)
 
 
+def _url_match(pattern: str, url: str) -> bool:
+    """Match a pattern against the address as written and with %-encoding decoded, so patterns
+    can be written in Arabic (e.g. "/category/الأسرة") for sites whose addresses are encoded."""
+    from urllib.parse import unquote
+
+    return bool(re.search(pattern, url, re.I) or re.search(pattern, unquote(url), re.I))
+
+
 def _matches_keywords(cfg: dict[str, Any], ex: Any) -> bool:
     """Focus a site on your topics: keep a page only if one of `keywords` appears in its title
     (and description, or the whole text with keywords_in="text"). Arabic spelling variants match."""
@@ -147,16 +155,16 @@ class WebCrawlerAdapter(SourceAdapter):
         if not _in_domains(url, domains):
             return False
         for pat in cfg.get("exclude_patterns") or []:
-            if re.search(pat, url):
+            if _url_match(pat, url):
                 return False
         inc = cfg.get("include_patterns") or []
-        if inc and not path.endswith(DOC_EXT) and not any(re.search(p, url) for p in inc):
+        if inc and not path.endswith(DOC_EXT) and not any(_url_match(p, url) for p in inc):
             return False
         return True
 
     def _is_content(self, url: str, cfg: dict[str, Any]) -> bool:
         pats = cfg.get("content_patterns") or []
-        return True if not pats else any(re.search(p, url) for p in pats)
+        return True if not pats else any(_url_match(p, url) for p in pats)
 
     def _seed(self, ctx: CollectContext, cfg: dict[str, Any], domains: list[str]) -> None:
         for u in cfg.get("start_urls") or []:

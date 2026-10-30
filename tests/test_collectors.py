@@ -311,3 +311,11 @@ def test_crawler_keywords_focus(env):
     assert _matches_keywords({**cfg, "keywords_in": "text"}, NS(title="ديوان", description="", full_text="عن الطفل"))
     assert not _matches_keywords({"keywords": ["طفل"], "keywords_in": "title"},
                                  NS(title="كتاب", description="في الطفل", full_text=""))
+
+
+def test_crawler_patterns_match_arabic_and_encoded_urls():
+    from tarbiyah.sources.web import _url_match
+
+    enc = "https://islamonline.net/category/%d8%a7%d9%84%d8%a3%d8%b3%d8%b1%d8%a9-%d9%81%d9%8a-%d8%a7%d9%84%d8%a5%d8%b3%d9%84%d8%a7%d9%85/page/2/"
+    assert _url_match("/category/الأسرة", enc) and _url_match("/page/\\d+/?$", enc)
+    assert not _url_match("/category/سياسة", enc)
