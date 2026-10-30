@@ -28,6 +28,7 @@ from .config import PROJECT_ROOT, get_config
 
 PROTECTED = {"data", ".env", ".venv", "backups", ".git", "node_modules"}
 VERSION_FILE = "version.json"
+DEFAULT_REPO = "rame42/tarbiyah-hub"
 
 
 def _version_path() -> Path:
@@ -48,7 +49,8 @@ def _save_version(info: dict) -> None:
 
 
 def _repo() -> tuple[str, str, str]:
-    repo = os.environ.get("TH_UPDATE_REPO") or _env_value("TH_UPDATE_REPO")
+    # this installation's own public repository is the default, so update.bat works without any setting
+    repo = os.environ.get("TH_UPDATE_REPO") or _env_value("TH_UPDATE_REPO") or DEFAULT_REPO
     token = os.environ.get("TH_UPDATE_TOKEN") or _env_value("TH_UPDATE_TOKEN")
     branch = os.environ.get("TH_UPDATE_BRANCH") or _env_value("TH_UPDATE_BRANCH") or "main"
     return (repo or "").strip(), (token or "").strip(), branch.strip()

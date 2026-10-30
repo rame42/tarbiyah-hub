@@ -48,7 +48,7 @@ def test_update_rejects_unrelated_or_unsafe_zips(env, tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         updater.update(str(other), log=lambda m: None)
     assert (root / "tarbiyah" / "__main__.py").read_text() == "old"
-    assert updater.check()["configured"] is False  # no TH_UPDATE_REPO: explains how to update by zip
+    assert updater._repo()[0] == "rame42/tarbiyah-hub"  # no TH_UPDATE_REPO: the project's own repository
 
 
 def test_update_messages_are_plain_and_env_is_tolerant(env, monkeypatch, tmp_path):
