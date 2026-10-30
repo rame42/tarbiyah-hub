@@ -297,6 +297,66 @@ def list_files(q: str = "", type: str | None = None, pillar: str | None = None, 
             "files_folder": str(get_config().files_dir), "items": items}
 
 
+# ============================================================== children's Quran, Seerah & Hadith
+
+@app.get("/api/kids-corner")
+def kids_corner(subject: str = "all", type: str | None = None, q: str = "", files_only: bool = False,
+                page: int = 1, page_size: int = 30, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..search.fts import view_clause
+
+    shelf = func.json_extract(Resource.extra, "$.kids_corner")
+    base = select(Resource).where(Resource.duplicate_of_id.is_(None), view_clause("active"), shelf.is_not(None))
+    counts = {"all": s.execute(select(func.count()).select_from(base.subquery())).scalar() or 0}
+    for sub in ("quran", "seerah", "hadith"):
+        counts[sub] = s.execute(select(func.count()).select_from(
+            base.where(shelf.like(f'%"{sub}"%')).subquery())).scalar() or 0
+    counts["files"] = s.execute(select(func.count()).select_from(
+        base.where(Resource.local_path.is_not(None)).subquery())).scalar() or 0
+    stmt = base
+    if subject in ("quran", "seerah", "hadith"):
+        stmt = stmt.where(shelf.like(f'%"{subject}"%'))
+    if type:
+        stmt = stmt.where(Resource.resource_type == type)
+    if files_only:
+        stmt = stmt.where(Resource.local_path.is_not(None))
+    if q.strip():
+        stmt = stmt.where(or_(Resource.title.ilike(f"%{q.strip()}%"), Resource.description.ilike(f"%{q.strip()}%")))
+    total = s.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+    sub = stmt.subquery()
+    types = dict(s.execute(select(sub.c.resource_type, func.count()).group_by(sub.c.resource_type)).all())
+    rows = s.execute(stmt.order_by(Resource.local_path.is_(None), Resource.relevance.desc().nulls_last(),
+                                   Resource.discovered_at.desc())
+                     .offset((max(1, page) - 1) * page_size).limit(page_size)).scalars().all()
+    running = s.execute(select(Job).where(Job.job_type.in_(("kids_corner_scan",)), Job.status.in_(queue.ACTIVE))).first()
+    return {"total": total, "page": page, "page_size": page_size, "counts": counts, "types": types,
+            "scanning": bool(running),
+            "items": [{**resource_brief(r), "subjects": (r.extra or {}).get("kids_corner") or [],
+                       "description": (r.description or "")[:280] or None} for r in rows]}
+
+
+@app.post("/api/kids-corner/find")
+def kids_corner_find(s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Search book libraries, YouTube playlists and papers with children's Quran / Seerah / Hadith queries."""
+    from ..kids_corner import QUERIES
+
+    wanted = ("internet_archive", "openlibrary", "gutenberg", "google_books", "youtube_courses", "youtube", "openalex")
+    srcs = [x for x in s.execute(select(Source).where(Source.enabled.is_(True), Source.adapter.in_(wanted))).scalars()
+            if (x.config or {}).get("role") == "search" and ADAPTERS[x.adapter].is_configured()]
+    if not srcs:
+        raise HTTPException(400, "No book, video or paper search source is enabled (see the Sources page).")
+    n = 0
+    for src in srcs:
+        for lang, qs in QUERIES.items():
+            for qtext in qs:
+                queue.enqueue(s, "search_source", {"source_id": src.id, "query": qtext, "lang": lang, "limit": 15},
+                              priority=35, group=src.key, dedupe_key=f"search:{src.id}:{qtext}")
+                n += 1
+    queue.enqueue(s, "kids_corner_scan", {}, priority=60, group="processing", dedupe_key="kids_corner_scan",
+                  run_after=utcnow() + timedelta(minutes=2))
+    return {"queued": n, "sources": [x.name for x in srcs],
+            "message": f"{n} searches started in the background across {len(srcs)} source(s)."}
+
+
 # ============================================================== courses
 
 COURSE_QUERIES = {"ar": ["تربية الأبناء", "تربية الطفل المسلم", "تربية المراهقين", "إعداد المربين", "التربية الإيمانية للأطفال"],

@@ -138,6 +138,8 @@ def apply_classification(session: Session, r: Resource, c: Classification, metho
         else:
             extra.pop("excluded_by", None)
     r.extra = extra
+    from ..kids_corner import tag
     from .manage import auto_curate
 
+    tag(r)  # children's Quran / Seerah / Hadith shelf
     auto_curate(session, r)

@@ -384,6 +384,30 @@ def suggest_sources_job(ctx: JobContext) -> dict[str, Any]:
     return res
 
 
+@handler("kids_corner_scan")
+def kids_corner_scan(ctx: JobContext) -> dict[str, Any]:
+    """Put existing library items on the children's Quran / Seerah / Hadith shelf (title, description)."""
+    from ..kids_corner import tag
+    from ..models import Setting
+
+    s = ctx.session
+    last, shelved = int(ctx.checkpoint.get("last_id", 0)), int(ctx.checkpoint.get("shelved", 0))
+    while not ctx.should_stop():
+        batch = s.execute(select(Resource).where(Resource.id > last, Resource.deleted.is_(False))
+                          .order_by(Resource.id).limit(200)).scalars().all()
+        if not batch:
+            break
+        for r in batch:
+            shelved += int(tag(r))
+            last = r.id
+        ctx.heartbeat({"last_id": last, "shelved": shelved})
+        ctx.commit()
+    row = s.get(Setting, "_kids_corner_scanned")
+    if row is None:
+        s.add(Setting(key="_kids_corner_scanned", value={"at": utcnow().isoformat()}))
+    return {"shelved": shelved}
+
+
 @handler("triage")
 def triage_job(ctx: JobContext) -> dict[str, Any]:
     """AI relevance screening of new items, 20 per request (bounded per run and by the daily AI limits)."""
@@ -459,6 +483,10 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
 
         if _candidates(s, 1):
             queue.enqueue(s, "triage", {"max_batches": 5}, priority=60, group="ai", dedupe_key="triage")
+    from ..models import Setting as _Setting
+
+    if s.get(_Setting, "_kids_corner_scanned") is None:  # once, for items collected before the shelf existed
+        queue.enqueue(s, "kids_corner_scan", {}, priority=70, group="processing", dedupe_key="kids_corner_scan")
     from ..agents.suggest import due as suggestions_due
 
     if suggestions_due(s):  # every 6 hours: learn similar sources from what the person's sources collected
