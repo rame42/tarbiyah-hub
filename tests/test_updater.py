@@ -72,3 +72,12 @@ def test_update_messages_are_plain_and_env_is_tolerant(env, monkeypatch, tmp_pat
     R.status_code = 401
     envf.write_text("TH_UPDATE_REPO=me/repo\nTH_UPDATE_TOKEN=github_pat_x\n", encoding="utf-8")
     assert "rejected TH_UPDATE_TOKEN" in updater.check()["error"]
+
+
+def test_env_duplicate_lines_last_filled_value_wins(env, monkeypatch, tmp_path):
+    from tarbiyah import updater
+
+    (tmp_path / ".env").write_text("TH_UPDATE_REPO=\n# TH_UPDATE_REPO=commented/out\nOTHER=1\nTH_UPDATE_REPO=me/repo\n")
+    monkeypatch.setattr(updater, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("TH_UPDATE_REPO", raising=False)
+    assert updater._repo()[0] == "me/repo"

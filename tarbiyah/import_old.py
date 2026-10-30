@@ -17,11 +17,13 @@ from .config import PROJECT_ROOT
 def _env_value(env: Path, key: str) -> str:
     if not env.exists():
         return ""
+    found = ""
     for line in env.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
         name, sep, value = line.partition("=")
-        if sep and name.strip() == key:
-            return value.strip().strip("\"'").strip()
-    return ""
+        value = value.strip().strip("\"'").strip()
+        if sep and name.strip() == key and value and not line.lstrip().startswith("#"):
+            found = value  # the last filled-in line wins, as when the settings are loaded
+    return found
 
 
 def find_old_install(given: Path) -> tuple[Path, Path]:

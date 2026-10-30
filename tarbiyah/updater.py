@@ -60,11 +60,15 @@ def _env_value(key: str) -> str:
     env = PROJECT_ROOT / ".env"
     if not env.exists():
         return ""
+    found = ""
     for line in env.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+        if line.lstrip().startswith("#"):
+            continue
         name, sep, value = line.partition("=")
-        if sep and name.strip() == key:  # tolerate spaces around '=' and quotes around the value
-            return value.strip().strip("\"'").strip()
-    return ""
+        value = value.strip().strip("\"'").strip()
+        if sep and name.strip() == key and value:  # tolerate spaces and quotes; the last filled-in line wins
+            found = value
+    return found
 
 
 def _headers(token: str) -> dict:
