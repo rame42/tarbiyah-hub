@@ -49,6 +49,8 @@ const D = {
   labels: ["Labels", "الوسوم"],
   show_deleted: ["Show deleted items", "عرض العناصر المحذوفة"],
   last_update_log: ["What happened at the last update", "ما حدث في آخر تحديث"],
+  apply_keywords: ["Apply the keywords to items already collected", "طبّق الكلمات المفتاحية على العناصر المجموعة سابقاً"],
+  apply_keywords_preview: ["items from this source do not contain any of its keywords and would be archived (not deleted), e.g.:", "عنصراً من هذا المصدر لا تحتوي على أي من كلماته المفتاحية وستُؤرشف (لا تُحذف)، مثل:"],
   nav_my_sources: ["My Sources", "مصادري"],
   add_my_source: ["Add a source", "إضافة مصدر"],
   my_sources_intro: ["The channels, websites and Telegram channels you added yourself. Everything they publish is collected and kept (never archived automatically), including their older history. The system also learns from them and suggests similar sources.", "القنوات والمواقع وقنوات تيليجرام التي أضفتها بنفسك. يُجمع كل ما تنشره ويُحفظ (ولا يُؤرشف تلقائياً)، بما في ذلك أرشيفها القديم. ويتعلم النظام منها ويقترح مصادر مشابهة."],

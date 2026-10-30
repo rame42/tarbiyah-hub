@@ -76,6 +76,7 @@ function SourceCard({ s, reload }: { s: MySource; reload: () => void }) {
         ) : <span className="small muted">{t("auto_source_filtered")}</span>}
         <Link className="btn btn-ghost btn-small" to="/sources">{t("edit_settings")}</Link>
       </div>
+      {Array.isArray(s.config.keywords) && (s.config.keywords as unknown[]).length ? <ApplyKeywords id={s.id} reload={reload} /> : null}
       {s.recent.length ? (
         <details>
           <summary className="small">{t("latest_from_source")}</summary>
@@ -129,5 +130,31 @@ function Suggestions({ d, reload }: { d: MyResponse; reload: () => void }) {
       </div>
       {d.suggestions_updated_at ? <p className="small muted">{t("updated")}: {fmtDate(d.suggestions_updated_at)}</p> : null}
     </Card>
+  );
+}
+
+function ApplyKeywords({ id, reload }: { id: number; reload: () => void }) {
+  const { t } = useI18n();
+  const [prev, setPrev] = useState<{ would_archive: number; examples: { id: number; title: string }[] } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const call = async (dry: boolean) => {
+    const r = await api.post<{ would_archive?: number; archived?: number; examples?: { id: number; title: string }[] }>(
+      `/api/my-sources/${id}/apply-keywords`, { dry_run: dry });
+    if (dry) setPrev({ would_archive: r.would_archive || 0, examples: r.examples || [] });
+    else { setPrev(null); setMsg(`${t("archived_n")} ${fmtNum(r.archived || 0)}`); reload(); }
+    return r;
+  };
+  return (
+    <div className="small">
+      <ActionButton className="btn btn-small" onRun={() => call(true)}>{t("apply_keywords")}</ActionButton>
+      {prev ? (
+        <div className="alert alert-warn">
+          <p><strong>{fmtNum(prev.would_archive)}</strong> {t("apply_keywords_preview")}</p>
+          <ul>{prev.examples.map((x) => <li key={x.id} dir="auto"><Link to={`/resources/${x.id}`}>{x.title}</Link></li>)}</ul>
+          {prev.would_archive ? <ActionButton className="btn btn-primary btn-small" onRun={() => call(false)}>{t("archive_now")}</ActionButton> : null}
+        </div>
+      ) : null}
+      {msg ? <span role="status"> {msg}</span> : null}
+    </div>
   );
 }

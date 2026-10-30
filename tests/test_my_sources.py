@@ -142,3 +142,28 @@ def test_daily_limit_shows_waiting_and_resumes_when_raised(env, monkeypatch):
         assert card["health"] == "ready"
         with session_scope() as s:
             assert s.query(Job).filter(Job.job_type == "collect_source").one().run_after <= queue.utcnow()
+
+
+def test_keywords_match_word_starts_and_apply_to_existing_items(env):
+    from tarbiyah.api.app import app
+    from tarbiyah.sources.base import matches_keywords as m
+
+    assert not m(["son", "parent", "teen"], "The reason a transparent person studies at fourteen")
+    assert m(["parent"], "Islamic Parenting Strategies") and m(["teen"], "Raising Teenagers")
+    assert m(["أطفال"], "تربية الأطفال") and m(["تربية"], "التَّربية الإيمانية")
+    with TestClient(app) as c:
+        src = c.post("/api/sources", json={"adapter": "web_crawler", "name": "Yaqeen",
+                                           "config": {"start_urls": ["https://yaqeen.example/"]}}).json()
+        with session_scope() as s:
+            ysrc = s.get(Source, src["id"])
+            for i, t in enumerate(["Islamic Parenting Strategies", "The Reason for Creation", "Marriage in Islam"]):
+                register_with_content(s, ResourceIn(title=t, url=f"https://yaqeen.example/{i}", resource_type="article",
+                                                    access=decide(None), collection_method="scrape:static",
+                                                    source_key=ysrc.key, source_id=ysrc.id))
+        assert c.post(f"/api/my-sources/{src['id']}/apply-keywords", json={}).status_code == 400  # no keywords yet
+        c.patch(f"/api/sources/{src['id']}", json={"config": {"keywords": ["parent", "marriage", "son"]}})
+        prev = c.post(f"/api/my-sources/{src['id']}/apply-keywords", json={"dry_run": True}).json()
+        assert prev["would_archive"] == 1 and prev["examples"][0]["title"] == "The Reason for Creation"
+        assert c.post(f"/api/my-sources/{src['id']}/apply-keywords", json={"dry_run": False}).json()["archived"] == 1
+        card = [x for x in c.get("/api/my-sources").json()["sources"] if x["id"] == src["id"]][0]
+        assert card["items"] == 2 and card["archived"] == 1

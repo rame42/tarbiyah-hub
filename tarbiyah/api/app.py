@@ -960,6 +960,32 @@ def keep_everything(sid: int, body: KeepIn, s: Session = Depends(get_session)) -
     return {"collect_everything": body.on, "changed": changed}
 
 
+class ApplyKeywordsIn(BaseModel):
+    dry_run: bool = True
+
+
+@app.post("/api/my-sources/{sid}/apply-keywords")
+def apply_keywords(sid: int, body: ApplyKeywordsIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Put aside items this source collected before its keywords were set (or changed)."""
+    from ..ingest.manage import archive_resource
+    from ..sources.base import matches_keywords
+
+    src = s.get(Source, sid)
+    if src is None:
+        raise _404("source")
+    words = (src.config or {}).get("keywords")
+    if not words:
+        raise HTTPException(400, "This source has no \"keywords\" in its settings.")
+    off = [r for r in s.execute(select(Resource).where(Resource.source_id == sid, Resource.deleted.is_(False),
+                                                       Resource.archived.is_(False))).scalars()
+           if not matches_keywords(words, r.title, r.description)]
+    if body.dry_run:
+        return {"would_archive": len(off), "examples": [{"id": r.id, "title": r.title} for r in off[:8]]}
+    for r in off:
+        archive_resource(s, r, by="user", reason="does not contain this source's keywords")
+    return {"archived": len(off)}
+
+
 class SuggestionIn(BaseModel):
     key: str
 

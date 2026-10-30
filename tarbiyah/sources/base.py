@@ -125,10 +125,18 @@ def matches_keywords(keywords: Any, *texts: str | None) -> bool:
     Used to focus a big site or a social account on your topics."""
     from ..text.arabic import normalize_for_search
 
+    import re
+
     words = [keywords] if isinstance(keywords, str) else list(keywords or [])
     hay = " " + normalize_for_search(" ".join(t for t in texts if t)) + " "
     for k in words:
         k = normalize_for_search(str(k)).strip()
-        if k and k in hay:
+        if not k:
+            continue
+        if re.fullmatch(r"[a-z0-9 '\-]+", k):
+            # English: from the start of a word ("parent" matches "parenting", not "transparent")
+            if re.search(r"(?<![a-z0-9])" + re.escape(k), hay):
+                return True
+        elif k in hay:  # Arabic: anywhere, because of attached prefixes (ال، و، ب، ل، ف)
             return True
     return False
