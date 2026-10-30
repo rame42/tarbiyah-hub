@@ -1020,6 +1020,71 @@ def keep_everything(sid: int, body: KeepIn, s: Session = Depends(get_session)) -
     return {"collect_everything": body.on, "changed": changed}
 
 
+PILLAR_KEYWORDS = [
+    "تربية", "تربيه", "التربوي", "مربي", "المربين", "تأديب", "طفل", "أطفال", "الطفولة", "الأولاد", "الأبناء", "البنات",
+    "المراهق", "المراهقة", "النشء", "الناشئة", "الأسرة", "الأسري", "الزوج", "الزوجة", "الزوجين", "الزواج", "الوالدين",
+    "بر الوالدين", "الأم", "الأب", "الآباء", "الأمهات", "المعلم", "المتعلم", "التعليم", "الحلقات", "تحفيظ", "القدوة",
+    "parent", "parenting", "child", "children", "childhood", "kids", "toddler", "raising", "upbringing", "tarbiya",
+    "family", "families", "marriage", "spouse", "husband", "wife", "mother", "father", "daughter", "youth", "teen",
+    "adolescen", "murabbi", "mentor", "educator", "teacher", "homeschool", "islamic school",
+]
+
+
+class BulkSitesIn(BaseModel):
+    urls: list[str]
+    pillar_keywords: bool = True
+    stay_in_section: bool = False
+    max_pages: int = 100
+
+
+@app.post("/api/my-sources/bulk-websites")
+def bulk_websites(body: BulkSitesIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Add many websites at once: one website source per address."""
+    import re
+
+    a = ADAPTERS["web_crawler"]
+    created, skipped = [], []
+    for raw in body.urls[:200]:
+        u = raw.strip().strip("\"'<>,")
+        if not u:
+            continue
+        if not u.lower().startswith(("http://", "https://")):
+            u = "https://" + u
+        parts = urlsplit(u)
+        host = (parts.hostname or "").lower()
+        if "." not in host:
+            skipped.append(f"{raw.strip()}: not a website address")
+            continue
+        domain = host[4:] if host.startswith("www.") else host
+        dup = [x for x in s.execute(select(Source).where(Source.adapter == "web_crawler")).scalars()
+               if u.rstrip("/") in [str(v).rstrip("/") for v in (x.config or {}).get("start_urls") or []]]
+        if dup:
+            skipped.append(f"{u}: already added ({dup[0].name})")
+            continue
+        cfg = {**a.info.default_config, "role": "monitor", "added_by": "user", "start_urls": [u],
+               "allowed_domains": [domain], "max_pages": max(10, min(int(body.max_pages), 500)),
+               "min_interval_seconds": 2}
+        path = parts.path.rstrip("/")
+        if body.stay_in_section and path:
+            cfg["include_patterns"] = [re.escape(path)]
+            cfg["use_sitemap"] = False
+        if body.pillar_keywords:
+            cfg["keywords"] = PILLAR_KEYWORDS
+            cfg["keywords_in"] = "title_description"
+        name = domain + (f" ({path.split('/')[-1][:40]})" if path else "")
+        base = re.sub(r"[^a-z0-9]+", "-", f"web-{domain}".lower()).strip("-")[:90]
+        key, n = base, 1
+        while s.execute(select(Source).where(Source.key == key)).first():
+            n += 1
+            key = f"{base}-{n}"
+        src = Source(key=key, adapter="web_crawler", name=name, enabled=True, config=cfg,
+                     schedule_minutes=1440, health="ready", next_run_at=utcnow())
+        s.add(src)
+        s.flush()
+        created.append(name)
+    return {"created": created, "skipped": skipped}
+
+
 class ApplyKeywordsIn(BaseModel):
     dry_run: bool = True
 

@@ -34,6 +34,7 @@ export default function MySources() {
       <Async state={state}>
         {(d) => (
           <>
+            <BulkWebsites reload={state.reload} />
             <Suggestions d={d} reload={state.reload} />
             {!d.sources.length ? <Card><p className="muted">{t("my_sources_empty")}</p></Card> : null}
             {d.sources.map((s) => <SourceCard key={s.id} s={s} reload={state.reload} />)}
@@ -156,5 +157,46 @@ function ApplyKeywords({ id, reload }: { id: number; reload: () => void }) {
       ) : null}
       {msg ? <span role="status"> {msg}</span> : null}
     </div>
+  );
+}
+
+function BulkWebsites({ reload }: { reload: () => void }) {
+  const { t } = useI18n();
+  const [text, setText] = useState("");
+  const [kw, setKw] = useState(true);
+  const [section, setSection] = useState(false);
+  const [res, setRes] = useState<{ created: string[]; skipped: string[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const urls = text.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const add = async () => {
+    setErr(null);
+    try {
+      const r = await api.post<{ created: string[]; skipped: string[] }>("/api/my-sources/bulk-websites",
+        { urls, pillar_keywords: kw, stay_in_section: section });
+      setRes(r);
+      if (r.created.length) { setText(""); reload(); }
+    } catch (e) { setErr((e as Error).message); }
+  };
+  return (
+    <Card title={t("bulk_sites_title")}>
+      <details>
+        <summary className="small">{t("bulk_sites_open")}</summary>
+        <p className="small">{t("bulk_sites_intro")}</p>
+        <textarea dir="ltr" rows={6} className="full-width" value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={"https://yaqeeninstitute.org/topic/family-community\nhttps://islamonline.net/\nexample.org"} />
+        <div className="toolbar spaced">
+          <label className="check"><input type="checkbox" checked={kw} onChange={(e) => setKw(e.target.checked)} />{t("bulk_sites_kw")}</label>
+          <label className="check" title={t("bulk_sites_section_help")}><input type="checkbox" checked={section} onChange={(e) => setSection(e.target.checked)} />{t("bulk_sites_section")}</label>
+          <button type="button" className="btn btn-primary" disabled={!urls.length} onClick={add}>{t("bulk_sites_add")} ({urls.length})</button>
+        </div>
+        {err ? <p className="small text-error">{err}</p> : null}
+        {res ? (
+          <div className="small" role="status">
+            {res.created.length ? <p>✓ {t("bulk_sites_added")}: {res.created.join(", ")}</p> : null}
+            {res.skipped.length ? <p className="muted">{t("bulk_sites_skipped")}: {res.skipped.join(" · ")}</p> : null}
+          </div>
+        ) : null}
+      </details>
+    </Card>
   );
 }

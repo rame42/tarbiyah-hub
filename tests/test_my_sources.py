@@ -167,3 +167,26 @@ def test_keywords_match_word_starts_and_apply_to_existing_items(env):
         assert c.post(f"/api/my-sources/{src['id']}/apply-keywords", json={"dry_run": False}).json()["archived"] == 1
         card = [x for x in c.get("/api/my-sources").json()["sources"] if x["id"] == src["id"]][0]
         assert card["items"] == 2 and card["archived"] == 1
+
+
+def test_add_many_websites_at_once(env):
+    from tarbiyah.api.app import app
+
+    with TestClient(app) as c:
+        r = c.post("/api/my-sources/bulk-websites", json={"urls": [
+            "https://yaqeeninstitute.org/topic/family-community", "islamonline.net", "  ", "not-a-site",
+            "https://www.example.org/"], "stay_in_section": True}).json()
+        assert r["created"] == ["yaqeeninstitute.org (family-community)", "islamonline.net", "example.org"]
+        assert r["skipped"] == ["not-a-site: not a website address"]
+        again = c.post("/api/my-sources/bulk-websites", json={"urls": ["islamonline.net"]}).json()
+        assert again["created"] == [] and "already added" in again["skipped"][0]
+        srcs = {x["name"]: x for x in c.get("/api/my-sources").json()["sources"]}
+        y = srcs["yaqeeninstitute.org (family-community)"]["config"]
+        import re
+
+        assert y["allowed_domains"] == ["yaqeeninstitute.org"]
+        assert y["include_patterns"] == [re.escape("/topic/family-community")]
+        assert "parenting" in y["keywords"] and "تربية" in y["keywords"]
+        assert srcs["islamonline.net"]["config"]["start_urls"] == ["https://islamonline.net"]
+        assert "include_patterns" not in srcs["islamonline.net"]["config"]  # no section path to stay in
+        assert all(x["mine"] and x["enabled"] for x in srcs.values())
