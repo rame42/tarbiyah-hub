@@ -108,6 +108,14 @@ def auto_curate(session: Session, r: Resource) -> None:
     ex = r.extra or {}
     if r.deleted or ex.get("archived_by") == "user" or r.collection_method in USER_METHODS:
         return
+    from ..models import Source
+    from .. import strict
+
+    src = session.get(Source, r.source_id) if r.source_id else None
+    scfg = strict.settings_of(src) if is_my_source(src) else None
+    if scfg:
+        strict.decide(session, r, src, scfg)  # strict sources: only items passing every check are kept
+        return
     if keeps_everything(session, r):
         if r.archived and ex.get("archived_by") == "auto":
             unarchive_resource(session, r, by="auto")

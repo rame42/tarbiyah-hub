@@ -54,6 +54,61 @@ def _in_domains(url: str, domains: list[str]) -> bool:
     return any(d == x or d.endswith("." + x) for x in domains)
 
 
+def site_labels(html: bytes) -> list[str]:
+    """How the site itself files a page: breadcrumb, category, section and tags (strict mode check 2)."""
+    import json
+
+    import lxml.html
+
+    text = None
+    for enc in ("utf-8", "cp1256"):  # most Arabic sites are UTF-8; older ones Windows-1256
+        try:
+            text = html.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    try:
+        doc = lxml.html.fromstring(text if text is not None else html.decode("latin-1"))
+    except (ValueError, lxml.etree.ParserError):
+        return []
+    out: list[str] = []
+
+    def add(t: Any) -> None:
+        t = re.sub(r"\s+", " ", str(t or "")).strip()
+        if t and len(t) <= 120 and t not in out:
+            out.append(t)
+
+    for node in doc.xpath('//script[@type="application/ld+json"]/text()'):
+        try:
+            data = json.loads(node)
+        except ValueError:
+            continue
+        stack = data if isinstance(data, list) else [data]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, list):
+                stack.extend(x)
+            elif isinstance(x, dict):
+                if "BreadcrumbList" in str(x.get("@type")):
+                    for el in x.get("itemListElement") or []:
+                        if isinstance(el, dict):
+                            add(el.get("name") or (el.get("item") or {}).get("name") if isinstance(el.get("item"), dict) else el.get("name"))
+                for k in ("articleSection", "keywords"):
+                    v = x.get(k)
+                    for t in (v if isinstance(v, list) else str(v or "").split(",")):
+                        add(t)
+                stack.extend(v for v in x.values() if isinstance(v, (list, dict)))
+    for m in doc.xpath('//meta[@property="article:section" or @property="article:tag" or @name="keywords"]/@content'):
+        for t in str(m).split(","):
+            add(t)
+    for a in doc.xpath('//a[contains(concat(" ", normalize-space(@rel), " "), " category ") or '
+                       'contains(concat(" ", normalize-space(@rel), " "), " tag ")]'):
+        add(a.text_content())
+    for a in doc.xpath('//*[contains(translate(@class, "BREADCUM", "breadcum"), "breadcrumb") or @aria-label="breadcrumb"]//a'):
+        add(a.text_content())
+    return out[:30]
+
+
 def _url_match(pattern: str, url: str) -> bool:
     """Match a pattern against the address as written and with %-encoding decoded, so patterns
     can be written in Arabic (e.g. "/category/الأسرة") for sites whose addresses are encoded."""
@@ -161,6 +216,19 @@ class WebCrawlerAdapter(SourceAdapter):
         if inc and not path.endswith(DOC_EXT) and not any(_url_match(p, url) for p in inc):
             return False
         return True
+
+    def _in_section(self, url: str, cfg: dict[str, Any]) -> bool:
+        """Is this page one of the section's own (list) pages? A start address at the site root means the whole site."""
+        from urllib.parse import unquote
+
+        path = unquote(urlsplit(url).path).rstrip("/").lower()
+        for s in cfg.get("start_urls") or []:
+            base = unquote(urlsplit(s).path).rstrip("/").lower()
+            if "." in base.rsplit("/", 1)[-1]:  # .../family/index.html -> the section is .../family
+                base = base.rsplit("/", 1)[0]
+            if not base or path == base or path.startswith(base + "/"):
+                return True
+        return False
 
     def _is_content(self, url: str, cfg: dict[str, Any]) -> bool:
         pats = cfg.get("content_patterns") or []
@@ -296,8 +364,8 @@ class WebCrawlerAdapter(SourceAdapter):
         first_time = row.content_hash is None
         row.content_hash = new_hash
         row.status = "done"
-        # links
-        if row.depth < max_depth:
+        # links (strict "stay in the section": only list pages inside the section are followed)
+        if row.depth < max_depth and (not cfg.get("section_lock") or self._in_section(url, cfg)):
             for link in ex.links:
                 href = urljoin(res.final_url, link.get("url", ""))
                 href = urldefrag(href)[0]
@@ -307,6 +375,8 @@ class WebCrawlerAdapter(SourceAdapter):
                         pass
                 elif self._allowed(href, cfg, domains):
                     self._add(ctx, href, row.depth + 1)
+        if cfg.get("files_only"):
+            return  # only the documents linked from these pages are wanted
         from ..ingest.courses import course_access, course_from_html
 
         course = course_from_html(html_bytes, res.final_url)
@@ -338,6 +408,7 @@ class WebCrawlerAdapter(SourceAdapter):
             text=ex.full_text,
             extra={"crawl_depth": row.depth, "updated_content": changed, "content_hash": new_hash,
                    "inline_method": "trafilatura",
+                   "site_labels": site_labels(html_bytes),
                    # links to other websites: used to suggest similar sources
                    "outlinks": sorted({urljoin(res.final_url, lk.get("url", "")) for lk in ex.links
                                        if lk.get("url", "").startswith("http")

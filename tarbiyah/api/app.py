@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import String, case, func, or_, select
+from sqlalchemy import String, case, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..bootstrap import init_app
@@ -28,6 +28,7 @@ from ..jobs import queue
 from ..models import (
     AgentRun,
     Chunk,
+    CrawlUrl,
     Citation,
     Claim,
     DailyReport,
@@ -987,7 +988,17 @@ def my_sources(s: Session = Depends(get_session)) -> dict[str, Any]:
         recent = s.execute(select(Resource).where(Resource.source_id == src.id, Resource.deleted.is_(False),
                                                   Resource.archived.is_(False))
                            .order_by(Resource.discovered_at.desc()).limit(5)).scalars().all()
+        from .. import strict as _strict
+
+        prec, judged = _strict.precision(src)
+        held = dict(s.execute(select(func.json_extract(Resource.extra, "$.archived_by"), func.count()).where(
+            Resource.source_id == src.id, Resource.deleted.is_(False), Resource.archived.is_(True))
+            .group_by(func.json_extract(Resource.extra, "$.archived_by"))).all())
         out.append({**_source(src, s), "mine": is_my_source(src), "added_by": cfg.get("added_by", "user"),
+                    "strict": {**_strict.DEFAULTS, **(cfg.get("strict") or {})},
+                    "strict_stats": (src.state or {}).get("strict_stats") or {},
+                    "precision": prec, "judged": judged,
+                    "waiting_check": int(held.get("strict", 0)), "to_review": int(held.get("review", 0)),
                     "suggested_because": cfg.get("suggested_because"),
                     "collect_everything": cfg.get("collect_everything", True) is not False and is_my_source(src),
                     "items": int(counts.get(False, 0)), "archived": int(counts.get(True, 0)),
@@ -1109,6 +1120,132 @@ def apply_keywords(sid: int, body: ApplyKeywordsIn, s: Session = Depends(get_ses
     for r in off:
         archive_resource(s, r, by="user", reason="does not contain this source's keywords")
     return {"archived": len(off)}
+
+
+class StrictIn(BaseModel):
+    strict: dict[str, Any]
+
+
+@app.put("/api/my-sources/{sid}/strict")
+def set_strict(sid: int, body: StrictIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Save a source's strict settings and apply them to the items it already collected."""
+    from .. import strict
+    from ..ingest.manage import auto_curate
+
+    src = s.get(Source, sid)
+    if src is None:
+        raise _404("source")
+    bad = set(body.strict) - set(strict.DEFAULTS)
+    if bad:
+        raise HTTPException(400, f"Unknown strict setting(s): {', '.join(sorted(bad))}")
+    cfg = {**strict.DEFAULTS, **body.strict}
+    if not set(cfg["pillars"]) <= {"children", "parents", "murabbi"} or not cfg["pillars"]:
+        raise HTTPException(400, "Choose at least one pillar: children, parents, murabbi.")
+    src.config = {**(src.config or {}), "strict": cfg}
+    s.flush()
+    changed = 0
+    for r in s.execute(select(Resource).where(Resource.source_id == sid, Resource.deleted.is_(False))).scalars():
+        before = r.archived
+        if not cfg["enabled"] and (r.extra or {}).get("archived_by") in ("strict", "review"):
+            from ..ingest.manage import unarchive_resource
+
+            unarchive_resource(s, r, by="auto")
+        elif cfg["enabled"] and strict.pre_save(cfg, r):
+            from ..ingest.manage import archive_resource
+
+            archive_resource(s, r, by="strict", reason="does not pass the strict checks: " + strict.pre_save(cfg, r))
+        else:
+            auto_curate(s, r)
+        changed += int(before != r.archived)
+    return {"strict": cfg, "changed": changed}
+
+
+@app.get("/api/review")
+def review_list(source_id: int | None = None, page: int = 1, page_size: int = 30,
+                s: Session = Depends(get_session)) -> dict[str, Any]:
+    stmt = select(Resource).where(Resource.deleted.is_(False), Resource.archived.is_(True),
+                                  func.json_extract(Resource.extra, "$.archived_by") == "review")
+    if source_id:
+        stmt = stmt.where(Resource.source_id == source_id)
+    total = s.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+    rows = s.execute(stmt.order_by(Resource.discovered_at.desc()).offset((max(1, page) - 1) * page_size)
+                     .limit(page_size)).scalars().all()
+    names = {x.id: x.name for x in s.execute(select(Source)).scalars()}
+    return {"total": total, "items": [{**resource_brief(r), "source_name": names.get(r.source_id),
+                                       "description": (r.description or "")[:300] or None,
+                                       "reason": (r.extra or {}).get("relevance_reason")} for r in rows]}
+
+
+class ReviewIn(BaseModel):
+    keep: bool
+
+
+@app.post("/api/review/{rid}")
+def review_item(rid: int, body: ReviewIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import strict
+
+    r = s.get(Resource, rid)
+    if r is None or r.deleted:
+        raise _404("resource")
+    strict.review(s, r, body.keep)
+    return {"kept": body.keep}
+
+
+class PreviewIn(BaseModel):
+    strict: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    limit: int = 20
+
+
+@app.post("/api/my-sources/{sid}/preview")
+def preview_source(sid: int, body: PreviewIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """What would this source save with these settings? Nothing is stored (a dry run on ~15 pages)."""
+    import uuid
+
+    from .. import strict
+    from ..ingest.classify import classify_text
+    from ..sources.base import CollectContext
+
+    src = s.get(Source, sid)
+    if src is None:
+        raise _404("source")
+    if src.adapter == "apify":
+        raise HTTPException(400, "Preview is not available for Apify sources (each run costs money).")
+    a = ADAPTERS[src.adapter]
+    cfg = {**a.info.default_config, **(src.config or {}), **(body.config or {})}
+    scfg = {**strict.DEFAULTS, **(cfg.get("strict") or {}), **(body.strict or {}), "enabled": True}
+    cfg.update({"max_pages": min(int(cfg.get("max_pages") or 15), 15), "min_interval_seconds": 1, "use_sitemap": False})
+    wanted = set(scfg["pillars"])
+    keep, reject, error = [], [], None
+    # a temporary source holds the crawl frontier; it is removed afterwards. The write lock is released before
+    # every web request (commit), exactly as during real collection, so other requests are never blocked.
+    tmp = Source(key=f"preview-{uuid.uuid4().hex[:8]}", adapter=src.adapter, name="preview", config=cfg)
+    s.add(tmp)
+    s.commit()
+    try:
+        ctx = CollectContext(source_config=cfg, checkpoint={}, session=s, state={}, source_id=tmp.id, source_key=tmp.key,
+                             commit=s.commit)
+        for d in a.collect(ctx):
+            item = {"title": d.title, "url": d.url, "type": d.resource_type,
+                    "site_labels": (d.extra or {}).get("site_labels") or []}
+            why = strict.pre_save(scfg, d)
+            if not why:
+                cl = classify_text(s, d.title, d.description or "", (d.text or "")[:20000], d.keywords)
+                item["score"], item["pillars"] = cl.relevance, sorted(cl.pillars)
+                if cl.relevance < int(scfg["min_score"]) or not (set(cl.pillars) & wanted):
+                    why = f"pillar check: score {cl.relevance}, pillars {', '.join(sorted(cl.pillars)) or 'none'}"
+            (reject if why else keep).append({**item, "reason": why} if why else item)
+            if len(keep) + len(reject) >= max(5, min(body.limit, 40)):
+                break
+    except Exception as e:  # noqa: BLE001 - show the problem instead of failing the page
+        error = f"{type(e).__name__}: {e}"[:500]
+    finally:
+        s.rollback()
+        s.execute(delete(CrawlUrl).where(CrawlUrl.source_id == tmp.id))
+        s.execute(delete(Source).where(Source.id == tmp.id))
+        s.commit()
+    return {"would_save": keep, "would_reject": reject, "error": error,
+            "note": "Keyword-rules estimate. With an AI key, the AI makes the final pillar check after collection."}
 
 
 class SuggestionIn(BaseModel):

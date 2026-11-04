@@ -119,3 +119,16 @@ The **My Sources** tab lists the channels, websites, Telegram channels and feeds
   video descriptions, Telegram channels linked in posts, websites your sites/videos keep linking to (checked
   every 6 hours, or "Look for similar sources now"). Add or dismiss each; optionally add strong ones
   automatically (their items stay relevance-filtered and they are marked "added automatically").
+
+## Strict mode (My Sources → a source → "Strict mode")
+Only items passing **every** check are kept; the rest is not saved (or stays aside with the reason):
+1. **Stay in the section** (websites): only the section's list pages and the items listed on them are read.
+2. **The site's own labels** (websites): the page's breadcrumb / category / tags must contain one of the
+   section names you give (e.g. "تربية الأبناء, Parenting"). Files (PDFs) found on section pages skip this check.
+3. **Kinds**: tick the kinds to accept, or "Only downloadable files".
+4. **Pillar check**: the item must belong to a ticked pillar with a score ≥ the minimum (default 40). The AI
+   judges when a key is set; otherwise the keyword rules after the full text is read. Items wait (hidden)
+   until checked.
+- **Review before adding**: items that pass wait in **To review** for ✔ / ✖ (✖ = removed, never collected again).
+- **Precision watch**: when fewer than the chosen % of judged items are relevant, the source pauses itself.
+- **Preview** shows what would be kept / rejected (with reasons) without saving anything.

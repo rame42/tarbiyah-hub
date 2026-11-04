@@ -96,20 +96,34 @@ def collect_source(ctx: JobContext) -> dict[str, Any]:
                                   log=messages.append, source_id=src.id, source_key=src.key, session=s, state=state,
                                   commit=ctx.commit)
             ctx.commit()
+            from .. import strict
+
+            scfg = strict.settings_of(src)
+            skipped_reasons: dict[str, int] = {}
             for d in adapter.collect(cctx):
                 d.source_id, d.source_key = src.id, src.key
+                why = strict.pre_save(scfg, d) if scfg else None
+                if why:  # strict mode: not saved at all
+                    strict.count_skipped(src)
+                    key = why.split(":")[0]
+                    skipped_reasons[key] = skipped_reasons.get(key, 0) + 1
+                    if ctx.should_stop():
+                        break
+                    continue
                 r, new = register_with_content(s, d)
                 seen += 1
                 created += int(new)
                 updated += int(bool(not new and d.extra.get("updated_content")))
                 after_register(ctx, r, new, d)
-                src.state = state
+                src.state = {**state, "strict_stats": (src.state or {}).get("strict_stats", {})}
                 ctx.commit()  # one short transaction per collected item
                 if seen % 20 == 0:
                     ctx.heartbeat(ctx.checkpoint)
                 if ctx.should_stop():
                     break
-            src.state = state
+            src.state = {**(src.state or {}), **state, "strict_stats": (src.state or {}).get("strict_stats", {})}
+            for why, n in skipped_reasons.items():
+                messages.append(f"strict mode: {n} item(s) not saved ({why})")
     except NotConfigured as e:
         src.health, src.last_error = "needs_credentials", str(e)
         raise PermanentFailure(str(e)) from e

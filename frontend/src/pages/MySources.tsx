@@ -9,7 +9,14 @@ interface MySource {
   last_run_at: string | null; next_run_at: string | null; config: Record<string, unknown>; mine: boolean;
   added_by: string; suggested_because?: string | null; collect_everything: boolean; items: number; archived: number;
   history_done: boolean; recent: ResourceBrief[]; adapter_info?: { label?: string } | null;
+  strict: StrictCfg; strict_stats: Record<string, number>; precision: number | null; judged: number;
+  waiting_check: number; to_review: number;
 }
+interface StrictCfg {
+  enabled: boolean; pillars: string[]; types: string[]; files_only: boolean; site_sections: string[];
+  min_score: number; review: boolean; pause_below: number; min_judged: number;
+}
+interface PreviewItem { title: string; url: string; type: string; site_labels: string[]; score?: number; pillars?: string[]; reason?: string }
 interface Suggestion {
   key: string; adapter: string; name: string; link: string; mentions: number; avg_relevance: number; score: number;
   from_sources: string[];
@@ -64,17 +71,18 @@ function SourceCard({ s, reload }: { s: MySource; reload: () => void }) {
         <div className="stat"><div className="stat-value small">{fmtDate(s.next_run_at) || "—"}</div><div className="stat-label">{t("next_run")}</div></div>
       </div>
       {s.last_error ? <ErrorBox error={s.last_error} /> : null}
+      {s.mine ? <StrictPanel s={s} reload={reload} /> : null}
       {s.history_done ? <p className="small">✓ {t("history_done")}</p> : null}
       <div className="toolbar spaced">
         <ActionButton className="btn btn-primary btn-small" onRun={run(() => api.post(`/api/sources/${s.id}/run`))}>{t("run_now")}</ActionButton>
         <ActionButton className="btn btn-small" onRun={run(() => api.patch(`/api/sources/${s.id}`, { enabled: !s.enabled }))}>{s.enabled ? t("disable_source") : t("enable_source")}</ActionButton>
-        {s.mine ? (
+        {s.mine && !s.strict.enabled ? (
           <label className="check" title={t("keep_everything_help")}>
             <input type="checkbox" checked={s.collect_everything}
               onChange={async (e) => { await api.post(`/api/my-sources/${s.id}/keep-everything`, { on: e.target.checked }); reload(); }} />
             {t("keep_everything")}
           </label>
-        ) : <span className="small muted">{t("auto_source_filtered")}</span>}
+        ) : !s.mine ? <span className="small muted">{t("auto_source_filtered")}</span> : null}
         <Link className="btn btn-ghost btn-small" to="/sources">{t("edit_settings")}</Link>
       </div>
       {Array.isArray(s.config.keywords) && (s.config.keywords as unknown[]).length ? <ApplyKeywords id={s.id} reload={reload} /> : null}
@@ -198,5 +206,88 @@ function BulkWebsites({ reload }: { reload: () => void }) {
         ) : null}
       </details>
     </Card>
+  );
+}
+
+const KINDS = ["article", "document", "book", "paper", "video", "course", "audio", "social_post"];
+const PILLARS3 = ["children", "parents", "murabbi"];
+
+function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
+  const { t, v } = useI18n();
+  const [cfg, setCfg] = useState<StrictCfg>(s.strict);
+  const [sections, setSections] = useState(s.strict.site_sections.join(", "));
+  const [lock, setLock] = useState(Boolean(s.config.section_lock));
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [prev, setPrev] = useState<{ would_save: PreviewItem[]; would_reject: PreviewItem[]; error: string | null; note: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isWeb = s.adapter === "web_crawler";
+  const toggle = (k: "pillars" | "types", x: string) =>
+    setCfg({ ...cfg, [k]: cfg[k].includes(x) ? cfg[k].filter((y) => y !== x) : [...cfg[k], x] });
+  const body = () => ({ ...cfg, site_sections: sections.split(/[,،\n]/).map((x) => x.trim()).filter(Boolean) });
+  const save = async () => {
+    setErr(null); setMsg(null); setBusy(true);
+    try {
+      if (isWeb && lock !== Boolean(s.config.section_lock)) await api.patch(`/api/sources/${s.id}`, { config: { section_lock: lock } });
+      const r = await api.put<{ changed: number }>(`/api/my-sources/${s.id}/strict`, { strict: body() });
+      setMsg(`${t("keys_saved")} · ${t("strict_changed")}: ${r.changed}`);
+      reload();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  const preview = async () => {
+    setErr(null); setPrev(null); setBusy(true);
+    try {
+      setPrev(await api.post(`/api/my-sources/${s.id}/preview`, { strict: body(), config: isWeb ? { section_lock: lock } : {} }));
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  const st = s.strict_stats || {};
+  return (
+    <details className="strict-panel" open={s.strict.enabled}>
+      <summary>
+        <strong>{t("strict_mode")}</strong>{" "}
+        {s.strict.enabled ? <span className="badge badge-good">{t("on")}</span> : <span className="badge badge-muted">{t("off")}</span>}
+        {s.strict.enabled ? <span className="small muted"> · {t("strict_precision")}: {s.precision ?? "—"}% ({s.judged}) · {t("strict_waiting")}: {s.waiting_check} · <Link to={`/review?source=${s.id}`}>{t("strict_to_review")}: {s.to_review}</Link> · {t("strict_skipped")}: {st.skipped_before_saving || 0}</span> : null}
+      </summary>
+      <div className="form-stack small">
+        <label className="check"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /> <strong>{t("strict_enable")}</strong></label>
+        {isWeb ? <label className="check"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> {t("strict_lock")}</label> : null}
+        {isWeb ? (
+          <label>{t("strict_sections")}
+            <input dir="auto" value={sections} onChange={(e) => setSections(e.target.value)} placeholder="تربية الأبناء, الأسرة, Parenting, Family" />
+          </label>
+        ) : null}
+        <fieldset className="check-row"><legend>{t("strict_pillars")}</legend>
+          {PILLARS3.map((p) => <label key={p} className="check"><input type="checkbox" checked={cfg.pillars.includes(p)} onChange={() => toggle("pillars", p)} />{t(`pillar_${p}` as never)}</label>)}
+        </fieldset>
+        <fieldset className="check-row"><legend>{t("strict_kinds")}</legend>
+          {KINDS.map((k) => <label key={k} className="check"><input type="checkbox" checked={cfg.types.includes(k)} onChange={() => toggle("types", k)} />{v(k)}</label>)}
+          <label className="check"><input type="checkbox" checked={cfg.files_only} onChange={(e) => setCfg({ ...cfg, files_only: e.target.checked })} /><strong>{t("strict_files_only")}</strong></label>
+        </fieldset>
+        <p className="muted">{t("strict_kinds_hint")}</p>
+        <div className="toolbar spaced">
+          <label className="field inline-field"><span>{t("strict_min_score")}</span>
+            <input type="number" min={0} max={100} value={cfg.min_score} onChange={(e) => setCfg({ ...cfg, min_score: Number(e.target.value) || 0 })} /></label>
+          <label className="field inline-field"><span>{t("strict_pause")}</span>
+            <input type="number" min={0} max={100} value={cfg.pause_below} onChange={(e) => setCfg({ ...cfg, pause_below: Number(e.target.value) || 0 })} />%</label>
+        </div>
+        <label className="check"><input type="checkbox" checked={cfg.review} onChange={(e) => setCfg({ ...cfg, review: e.target.checked })} /> {t("strict_review")}</label>
+        <div className="toolbar spaced">
+          <button type="button" className="btn" disabled={busy || s.adapter === "apify"} onClick={preview}>{busy ? "…" : t("strict_preview")}</button>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={save}>{t("save")}</button>
+          {msg ? <span role="status">{msg}</span> : null}
+        </div>
+        {err ? <p className="text-error">{err}</p> : null}
+        {prev ? (
+          <div className="preview-box">
+            {prev.error ? <p className="text-error">{prev.error}</p> : null}
+            <p><strong>✔ {t("strict_would_save")} ({prev.would_save.length})</strong></p>
+            <ul>{prev.would_save.map((x) => <li key={x.url} dir="auto"><a href={x.url} target="_blank" rel="noopener noreferrer">{x.title}</a> <span className="muted">· {v(x.type)} · {t("relevance_short")} {x.score}{x.site_labels.length ? ` · ${x.site_labels.slice(0, 3).join(" / ")}` : ""}</span></li>)}</ul>
+            <p><strong>✖ {t("strict_would_reject")} ({prev.would_reject.length})</strong></p>
+            <ul>{prev.would_reject.map((x) => <li key={x.url} dir="auto"><a href={x.url} target="_blank" rel="noopener noreferrer">{x.title}</a> <span className="muted">· {x.reason}</span></li>)}</ul>
+            <p className="muted">{prev.note}</p>
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }

@@ -1216,3 +1216,7 @@ a.bar-row { color: inherit; text-decoration: none; }
 .keys-grid { margin-block: 0.6rem 1rem; }
 .pre-error { border-color: var(--danger); }
 .full-width { inline-size: 100%; font: inherit; }
+.strict-panel { border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; margin-block: 0.6rem; }
+.strict-panel summary { cursor: pointer; }
+.preview-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; }
+.preview-box ul { margin: 0.2rem 0 0.6rem; padding-inline-start: 1.2rem; }

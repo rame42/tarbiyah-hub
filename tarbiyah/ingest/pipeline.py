@@ -254,6 +254,15 @@ def _load_extract(session: Session, r: Resource, claude_ocr: OcrFn | None) -> Ex
 
 
 def process(session: Session, r: Resource, claude_ocr: OcrFn | None = None) -> str:
+    """Extract, chunk, classify and index one resource, then apply the curation rules with the final status."""
+    status = _process(session, r, claude_ocr)
+    from .manage import auto_curate
+
+    auto_curate(session, r)  # e.g. strict sources decide once the full text has been read
+    return status
+
+
+def _process(session: Session, r: Resource, claude_ocr: OcrFn | None = None) -> str:
     """Extract, chunk, classify and index one resource. Returns processing status."""
     try:
         res = _load_extract(session, r, claude_ocr)
