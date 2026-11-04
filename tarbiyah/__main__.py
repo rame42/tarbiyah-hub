@@ -16,6 +16,7 @@
   update [--zip FILE]       update the program in place (keeps data/, .env, settings)
   backup [--dest DIR]       consistent backup of the database and files
   restore ARCHIVE           restore a backup archive (stop web/worker first)
+  self-update               install a new version from GitHub, check it starts, roll back if not, restart
   import-old FOLDER         bring the library, files and keys of an older Tarbiyah Hub folder into this one
 """
 from __future__ import annotations
@@ -72,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--check", action="store_true")
     rs = sub.add_parser("restore")
     rs.add_argument("archive")
+    sub.add_parser("self-update")
     io = sub.add_parser("import-old")
     io.add_argument("folder", nargs="+")  # a path with spaces may arrive in pieces
     args = ap.parse_args(argv)
@@ -90,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         init_app()  # upgrades the copied database to this version
         print("The library is ready. Double-click start.bat.")
         return 0
+    if args.cmd == "self-update":  # the automatic-update helper (started by the worker or "Update now")
+        from .autoupdate import run_self_update
+
+        res = run_self_update()
+        return 0 if res.get("updated") or not res.get("error") else 1
     _setup_logging()  # after import-old: on Windows an open log file inside data/ blocks moving that folder
     if args.cmd == "test-ai":
         from .aitest import run

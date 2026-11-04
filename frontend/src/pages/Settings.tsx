@@ -217,12 +217,23 @@ interface UpdateInfo {
   current?: { sha?: string; installed_at?: string; source?: string };
   latest?: { sha: string; date: string | null; message: string };
   last_log?: string;
+  auto_update?: boolean;
+  auto_update_hours?: number;
+  auto_possible?: boolean;
+  updating?: boolean;
 }
 
 function Updates() {
   const { t } = useI18n();
   const state = useAsync(() => api.get<UpdateInfo>("/api/update"), []);
   const u = state.data;
+  const [msg, setMsg] = useState<string | null>(null);
+  const toggleAuto = async (on: boolean) => { await api.patch("/api/settings", { auto_update: on }); state.reload(); };
+  const updateNow = async () => {
+    const r = await api.post<{ started: boolean; message: string }>("/api/update/now");
+    setMsg(r.message);
+    return r;
+  };
   return (
     <Card title={t("updates")}>
       <ErrorBox error={state.error} />
@@ -235,9 +246,19 @@ function Updates() {
             u.update_available ? (
               <div className="alert alert-ok" role="status">
                 <strong>{t("update_available")}</strong> <code>{u.latest.sha}</code> — <span dir="auto">{u.latest.message}</span>
-                <p>{t("update_how")}</p>
+                {u.auto_possible ? (
+                  <p><ActionButton className="btn btn-primary btn-small" onRun={updateNow}>{t("update_now")}</ActionButton></p>
+                ) : <p>{t("update_how")}</p>}
               </div>
             ) : <p>{t("up_to_date")}</p>
+          ) : null}
+          {u.updating ? <div className="alert alert-info" role="status">{t("updating_now")}</div> : null}
+          {msg ? <div className="alert alert-info" role="status">{msg}</div> : null}
+          {u.auto_possible ? (
+            <label className="check">
+              <input type="checkbox" checked={!!u.auto_update} onChange={(e) => toggleAuto(e.target.checked)} />
+              {t("auto_update_label").replace("{h}", String(u.auto_update_hours ?? 6))}
+            </label>
           ) : null}
           <p className="muted">{t("update_keeps")}</p>
           {u.last_log ? (

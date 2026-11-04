@@ -483,6 +483,13 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
 
         if _candidates(s, 1):
             queue.enqueue(s, "triage", {"max_batches": 5}, priority=60, group="ai", dedupe_key="triage")
+    try:  # automatic updates: check GitHub every few hours, install safely in a separate helper
+        from ..autoupdate import maybe_check
+
+        if maybe_check(s) == "started":
+            out["update"] = "started"
+    except Exception:  # noqa: BLE001 - an update check must never break maintenance
+        log.exception("automatic update check failed")
     from ..models import Setting as _Setting
 
     if s.get(_Setting, "_kids_corner_scanned") is None:  # once, for items collected before the shelf existed

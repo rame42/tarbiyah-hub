@@ -34,6 +34,8 @@ export const SETTING_LABELS: Record<string, [string, string]> = {
   crawler_default_max_pages: ["Website pages per run", "صفحات الموقع في كل تشغيل"],
   crawler_default_max_depth: ["Website link depth", "عمق روابط الموقع"],
   respect_robots_txt: ["Respect websites' robots.txt rules", "احترام قواعد robots.txt للمواقع"],
+  auto_update: ["Update automatically", "التحديث تلقائياً"],
+  auto_update_hours: ["Check for updates every (hours)", "فحص التحديثات كل (ساعات)"],
   ui_language: ["Dashboard language", "لغة لوحة التحكم"],
   auto_archive_below: ["Auto-archive new items below relevance (0 = off)", "أرشفة العناصر الجديدة تحت هذه الصلة (0 = متوقف)"],
   ai_triage: ["AI screens new items for relevance", "الذكاء الاصطناعي يفحص صلة العناصر الجديدة"],

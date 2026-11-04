@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..bootstrap import init_app
 from ..config import PROJECT_ROOT, get_config
-from ..db import get_session, utcnow
+from ..db import get_session, session_scope, utcnow
 from ..jobs import queue
 from ..models import (
     AgentRun,
@@ -1460,9 +1460,31 @@ def download_output(oid: int, fmt: str = "md", s: Session = Depends(get_session)
 
 @app.get("/api/update")
 def update_status() -> dict[str, Any]:
+    from ..autoupdate import _lock_busy, enabled
     from ..updater import check, last_update_log
 
-    return {**check(), "last_log": last_update_log()}
+    with session_scope() as s:
+        settings = get_all(s)
+    return {**check(), "last_log": last_update_log(), "auto_update": settings["auto_update"],
+            "auto_update_hours": settings["auto_update_hours"], "auto_possible": enabled(), "updating": _lock_busy()}
+
+
+@app.post("/api/update/now")
+def update_now() -> dict[str, Any]:
+    """Install the newest version now (stops, updates, checks, restarts; about a minute)."""
+    from ..autoupdate import enabled, spawn
+    from ..updater import check
+
+    if not enabled():
+        raise HTTPException(400, "This is a developer copy (git): update it with git instead.")
+    info = check()
+    if info.get("error"):
+        raise HTTPException(400, info["error"])
+    if not info.get("update_available"):
+        return {"started": False, "message": "Already up to date."}
+    if not spawn():
+        return {"started": False, "message": "An update is already running."}
+    return {"started": True, "message": "Updating: Tarbiyah Hub restarts in about a minute. This page reconnects by itself."}
 
 
 @app.post("/api/backup")

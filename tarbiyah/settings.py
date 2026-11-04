@@ -62,6 +62,9 @@ DEFAULTS: dict[str, Any] = {
     "research_trusted_only": False,      # research searches only scholarly and book sources
     "auto_add_sources": False,           # add strong source suggestions automatically
     "auto_add_min_mentions": 5,          # ...when mentioned by at least this many collected items
+    # updates
+    "auto_update": True,                 # install new versions from GitHub automatically (with rollback)
+    "auto_update_hours": 6,              # how often to check
     # ui
     "ui_language": "en",
 }
