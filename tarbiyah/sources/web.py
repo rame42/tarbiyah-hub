@@ -109,6 +109,46 @@ def site_labels(html: bytes) -> list[str]:
     return out[:30]
 
 
+def explore_links(html: bytes, base: str, domains: list[str], limit: int = 120) -> list[dict[str, Any]]:
+    """Links of a page that could be sections: menu/navigation links first, then other internal links,
+    grouped by address (with how many links point inside each), for the person to choose from."""
+    import lxml.html
+
+    text = None
+    for enc in ("utf-8", "cp1256"):
+        try:
+            text = html.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    try:
+        doc = lxml.html.fromstring(text if text is not None else html.decode("latin-1"))
+    except (ValueError, lxml.etree.ParserError):
+        return []
+    seen: dict[str, dict[str, Any]] = {}
+    for a in doc.xpath("//a[@href]"):
+        href = urldefrag(urljoin(base, a.get("href") or ""))[0]
+        if not href.startswith(("http://", "https://")) or not _in_domains(href, domains):
+            continue
+        low = urlsplit(href).path.lower()
+        if low.endswith(SKIP_EXT) or any(x in href.lower() for x in ("login", "register", "wp-admin", "/feed", "mailto:",
+                                                                        "javascript:", "/tag/", "/author/", "?share")):
+            continue
+        label = re.sub(r"\s+", " ", a.text_content() or "").strip()
+        if not label or len(label) > 80:
+            continue
+        in_nav = bool(a.xpath("ancestor::nav or ancestor::header or ancestor::*[contains(translate(@class,'MENU','menu'),'menu') "
+                              "or contains(translate(@id,'MENU','menu'),'menu') or contains(translate(@class,'NAV','nav'),'nav')]"))
+        item = seen.setdefault(href, {"url": href, "label": label, "menu": False, "depth": low.strip("/").count("/") + (1 if low.strip("/") else 0)})
+        item["menu"] = item["menu"] or in_nav
+    items = list(seen.values())
+    for it in items:  # how many other links live under this address: big sections first
+        p = urlsplit(it["url"]).path.rstrip("/")
+        it["inside"] = sum(1 for o in items if o is not it and p and urlsplit(o["url"]).path.startswith(p + "/"))
+    items.sort(key=lambda x: (not x["menu"], -x["inside"], x["depth"], x["label"]))
+    return items[:limit]
+
+
 def _url_match(pattern: str, url: str) -> bool:
     """Match a pattern against the address as written and with %-encoding decoded, so patterns
     can be written in Arabic (e.g. "/category/الأسرة") for sites whose addresses are encoded."""

@@ -1243,6 +1243,115 @@ def bulk_websites(body: BulkSitesIn, s: Session = Depends(get_session)) -> dict[
     return {"created": created, "skipped": skipped}
 
 
+def _site_domain(u: str) -> str:
+    h = (urlsplit(u).hostname or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def _existing_site(s: Session, url: str) -> Source | None:
+    d = _site_domain(url)
+    for x in s.execute(select(Source).where(Source.adapter == "web_crawler")).scalars():
+        cfg = x.config or {}
+        if x.health == "deleted":
+            continue
+        if any(_site_domain(u) == d for u in cfg.get("start_urls") or []) or d in (cfg.get("allowed_domains") or []):
+            return x
+    return None
+
+
+@app.get("/api/catalog")
+def catalog_list(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from ..catalog import CATALOG
+
+    out = []
+    for c in CATALOG:
+        ex = _existing_site(s, c["url"])
+        out.append({**c, "added": ex is not None, "source_id": ex.id if ex else None, "source_name": ex.name if ex else None})
+    return {"sites": out}
+
+
+class CatalogAddIn(BaseModel):
+    keys: list[str]
+
+
+@app.post("/api/catalog/add")
+def catalog_add(body: CatalogAddIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Add recommended websites as sources, switched OFF: the person chooses sections, previews, then enables."""
+    import re
+
+    from .. import strict
+    from ..catalog import CATALOG
+
+    a = ADAPTERS["web_crawler"]
+    by_key = {c["key"]: c for c in CATALOG}
+    added, skipped = [], []
+    for k in body.keys:
+        c = by_key.get(k)
+        if c is None:
+            continue
+        if _existing_site(s, c["url"]):
+            skipped.append(f"{c['name']}: already in your sources")
+            continue
+        cfg = {**a.info.default_config, "role": "monitor", "added_by": "user", "start_urls": [c["url"]],
+               "allowed_domains": [_site_domain(c["url"])], "section_lock": True, "use_sitemap": False,
+               "max_pages": 100, "min_interval_seconds": 3, "language": c["lang"], "catalog": c["key"],
+               "strict": {**strict.DEFAULTS, "enabled": True, "pillars": c["pillars"]}}
+        base = re.sub(r"[^a-z0-9]+", "-", f"web-{c['key']}").strip("-")
+        key, n = base, 1
+        while s.execute(select(Source).where(Source.key == key)).first():
+            n += 1
+            key = f"{base}-{n}"
+        s.add(Source(key=key, adapter="web_crawler", name=c["name"], enabled=False, config=cfg,
+                     schedule_minutes=1440, health="ready"))
+        added.append(c["name"])
+    s.flush()
+    return {"added": added, "skipped": skipped}
+
+
+@app.post("/api/my-sources/{sid}/explore")
+def explore_site(sid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """The site's sections: menu links of its start page (and other internal links), to choose what to read."""
+    from ..http import FetchError, RobotsDisallowed, http
+    from ..sources.web import explore_links
+
+    src = s.get(Source, sid)
+    if src is None or src.adapter != "web_crawler":
+        raise HTTPException(400, "Choose sections works for website sources.")
+    cfg = src.config or {}
+    starts = cfg.get("start_urls") or []
+    if not starts:
+        raise HTTPException(400, "This source has no website address.")
+    page = cfg.get("explore_from") or starts[0]
+    s.commit()  # do not hold the database while waiting for the website
+    try:
+        res = http().fetch(page, min_interval=1, max_bytes=6_000_000)
+    except RobotsDisallowed:
+        raise HTTPException(400, "The website's rules (robots.txt) do not allow reading this page.") from None
+    except FetchError as e:
+        raise HTTPException(400, f"Could not open {page}: {e}") from None
+    links = explore_links(res.content, res.final_url, cfg.get("allowed_domains") or [_site_domain(page)])
+    return {"page": res.final_url, "current": starts, "links": links}
+
+
+class SectionsIn(BaseModel):
+    urls: list[str]
+
+
+@app.put("/api/my-sources/{sid}/sections")
+def set_sections(sid: int, body: SectionsIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    src = s.get(Source, sid)
+    if src is None or src.adapter != "web_crawler":
+        raise _404("website source")
+    urls = [u.strip() for u in body.urls if u.strip().lower().startswith(("http://", "https://"))][:50]
+    if not urls:
+        raise HTTPException(400, "Choose at least one section.")
+    doms = {_site_domain(u) for u in urls} | set((src.config or {}).get("allowed_domains") or [])
+    src.config = {**(src.config or {}), "start_urls": urls, "section_lock": True, "use_sitemap": False,
+                  "allowed_domains": sorted(doms)}
+    s.execute(delete(CrawlUrl).where(CrawlUrl.source_id == sid, CrawlUrl.status == "pending"))  # old plan of pages
+    return {"start_urls": urls}
+
+
 class ApplyKeywordsIn(BaseModel):
     dry_run: bool = True
 

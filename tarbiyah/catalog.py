@@ -1,0 +1,40 @@
+"""Recommended tarbiyah websites. They are added switched off: the person chooses the sections to read
+("Choose sections"), checks with Preview, and enables the source. `section` marks addresses confirmed to be
+a tarbiyah/family section; the others start at the home page and the sections are chosen in the dashboard."""
+from __future__ import annotations
+
+CATALOG: list[dict] = [
+    {"key": "islamonline-family", "name": "IslamOnline – من أجل أسرتي / الأسرة في الإسلام", "lang": "ar",
+     "url": "https://islamonline.net/category/الأسرة-في-الإسلام/", "section": True, "pillars": ["parents", "children"],
+     "about": "Family and upbringing articles: تربية الأبناء في الإسلام، أسرة سعيدة، الأسرة والعالم الرقمي."},
+    {"key": "yaqeen-family", "name": "Yaqeen Institute – Family & Community", "lang": "en",
+     "url": "https://yaqeeninstitute.org/topic/family-community", "section": True, "pillars": ["parents", "children"],
+     "about": "Research papers, articles and video series on parenting, marriage and Muslim families."},
+    {"key": "alukah-social", "name": "شبكة الألوكة – مجتمع وإصلاح", "lang": "ar",
+     "url": "https://www.alukah.net/social/", "section": True, "pillars": ["children", "parents", "murabbi"],
+     "about": "Large Arabic library of articles, books (PDF) and sermons; its تربية والتعليم branch is under this section."},
+    {"key": "saaid", "name": "صيد الفوائد", "lang": "ar", "url": "https://saaid.net/", "section": False,
+     "pillars": ["children", "parents", "murabbi"],
+     "about": "Arabic articles and books by scholars and educators; choose its tarbiyah/family sections."},
+    {"key": "islamweb", "name": "إسلام ويب", "lang": "ar", "url": "https://www.islamweb.net/ar/", "section": False,
+     "pillars": ["parents", "children"],
+     "about": "Arabic articles library; choose the family and upbringing (الأسرة والمجتمع) sections."},
+    {"key": "soundvision-parenting", "name": "SoundVision – Parenting", "lang": "en",
+     "url": "https://www.soundvision.com/parenting", "section": True, "pillars": ["children", "parents"],
+     "about": "Islamic parenting articles for Muslim families in the West, organised by the child's age."},
+    {"key": "iiit", "name": "IIIT – International Institute of Islamic Thought", "lang": "en", "url": "https://iiit.org/",
+     "section": False, "pillars": ["murabbi"],
+     "about": "Books and papers on Islamic education, educational philosophy and curriculum (many free)."},
+    {"key": "isla", "name": "Islamic Schools League of America", "lang": "en", "url": "https://theisla.org/",
+     "section": False, "pillars": ["murabbi"], "about": "Resources for Islamic schools, teachers and school leaders."},
+    {"key": "ams-uk", "name": "Association of Muslim Schools UK", "lang": "en", "url": "https://ams-uk.org/",
+     "section": False, "pillars": ["murabbi"], "about": "Muslim schools' network: guidance and resources for educators."},
+    {"key": "khalil-center", "name": "Khalil Center", "lang": "en", "url": "https://khalilcenter.com/", "section": False,
+     "pillars": ["parents"], "about": "Islamic psychology: family, marriage and youth wellbeing articles."},
+    {"key": "project-sakinah", "name": "Project Sakinah – parent resources", "lang": "en",
+     "url": "https://projectsakinah.org/Resources/Parent-Resources", "section": True, "pillars": ["parents"],
+     "about": "Resources for Muslim parents and healthy, safe families."},
+    {"key": "shamela", "name": "المكتبة الشاملة (Shamela)", "lang": "ar", "url": "https://shamela.ws/", "section": False,
+     "pillars": ["murabbi", "children"],
+     "about": "Classical books: choose the adab/akhlaq/tarbiyah categories (al-Zarnuji, Ibn Sahnun, Ibn Jamaʿa, al-Ghazali)."},
+]

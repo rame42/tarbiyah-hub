@@ -1220,3 +1220,4 @@ a.bar-row { color: inherit; text-decoration: none; }
 .strict-panel summary { cursor: pointer; }
 .preview-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; }
 .preview-box ul { margin: 0.2rem 0 0.6rem; padding-inline-start: 1.2rem; }
+.sections-list { max-block-size: 22rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.6rem; display: grid; gap: 0.25rem; }

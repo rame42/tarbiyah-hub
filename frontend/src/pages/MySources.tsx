@@ -41,6 +41,7 @@ export default function MySources() {
       <Async state={state}>
         {(d) => (
           <>
+            <Catalog reload={state.reload} />
             <BulkWebsites reload={state.reload} />
             <Suggestions d={d} reload={state.reload} />
             {!d.sources.length ? <Card><p className="muted">{t("my_sources_empty")}</p></Card> : null}
@@ -71,6 +72,7 @@ function SourceCard({ s, reload }: { s: MySource; reload: () => void }) {
         <div className="stat"><div className="stat-value small">{fmtDate(s.next_run_at) || "—"}</div><div className="stat-label">{t("next_run")}</div></div>
       </div>
       {s.last_error ? <ErrorBox error={s.last_error} /> : null}
+      {s.adapter === "web_crawler" && s.mine ? <SectionPicker s={s} reload={reload} /> : null}
       {s.mine ? <StrictPanel s={s} reload={reload} /> : null}
       {s.history_done ? <p className="small">✓ {t("history_done")}</p> : null}
       <div className="toolbar spaced">
@@ -287,6 +289,123 @@ function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
             <p className="muted">{prev.note}</p>
           </div>
         ) : null}
+      </div>
+    </details>
+  );
+}
+
+interface CatalogSite { key: string; name: string; url: string; lang: string; section: boolean; pillars: string[];
+  about: string; added: boolean; source_name: string | null }
+
+function Catalog({ reload }: { reload: () => void }) {
+  const { t } = useI18n();
+  const state = useAsync(() => api.get<{ sites: CatalogSite[] }>("/api/catalog"), []);
+  const [msg, setMsg] = useState<string | null>(null);
+  const add = async (keys: string[]) => {
+    const r = await api.post<{ added: string[]; skipped: string[] }>("/api/catalog/add", { keys });
+    setMsg(`${t("bulk_sites_added")}: ${r.added.length}${r.skipped.length ? ` · ${t("bulk_sites_skipped")}: ${r.skipped.length}` : ""}`);
+    state.reload(); reload();
+    return r;
+  };
+  return (
+    <Card title={t("catalog_title")}>
+      <details>
+        <summary className="small">{t("catalog_open")}</summary>
+        <p className="small">{t("catalog_intro")}</p>
+        <Async state={state}>
+          {(d) => (
+            <>
+              <div className="toolbar spaced">
+                <ActionButton className="btn btn-primary btn-small" onRun={() => add(d.sites.filter((x) => !x.added).map((x) => x.key))}>
+                  {t("catalog_add_all")} ({d.sites.filter((x) => !x.added).length})
+                </ActionButton>
+                {msg ? <span className="small" role="status">{msg}</span> : null}
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <tbody>
+                    {d.sites.map((x) => (
+                      <tr key={x.key}>
+                        <td dir="auto"><strong>{x.name}</strong><br /><a className="small" href={x.url} target="_blank" rel="noopener noreferrer" dir="ltr">{decodeURI(x.url)} ↗</a>
+                          <div className="small muted" dir="auto">{x.about}</div></td>
+                        <td className="small">{x.pillars.map((p) => t(`pillar_${p}` as never)).join(", ")}<br />
+                          <span className="muted">{x.section ? t("catalog_section") : t("catalog_home")}</span></td>
+                        <td className="nowrap">{x.added ? <span className="badge badge-good">{t("catalog_added")}</span>
+                          : <ActionButton className="btn btn-small" onRun={() => add([x.key])}>{t("add")}</ActionButton>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Async>
+      </details>
+    </Card>
+  );
+}
+
+interface ExploreLink { url: string; label: string; menu: boolean; inside: number }
+
+const isHome = (u: string) => {
+  try { const p = new URL(u).pathname.replace(/\/(index\.\w+)?$/, ""); return p === ""; } catch { return false; }
+};
+
+function SectionPicker({ s, reload }: { s: MySource; reload: () => void }) {
+  const { t } = useI18n();
+  const current = (s.config.start_urls as string[]) || [];
+  const [links, setLinks] = useState<ExploreLink[] | null>(null);
+  const [chosen, setChosen] = useState<string[]>(current);
+  const [extra, setExtra] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const explore = async () => {
+    setErr(null); setBusy(true);
+    try { setLinks((await api.post<{ links: ExploreLink[] }>(`/api/my-sources/${s.id}/explore`)).links); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  const toggle = (u: string) => setChosen((c) => (c.includes(u) ? c.filter((x) => x !== u) : [...c, u]));
+  const save = async () => {
+    setErr(null);
+    const urls = [...chosen, ...extra.split(/\s+/).filter((x) => x.startsWith("http"))];
+    try {
+      await api.put(`/api/my-sources/${s.id}/sections`, { urls });
+      setMsg(t("sections_saved")); setExtra(""); reload();
+    } catch (e) { setErr((e as Error).message); }
+  };
+  return (
+    <details className="strict-panel">
+      <summary><strong>{t("sections_title")}</strong> <span className="small muted">· {current.map((u) => decodeURI(u)).join(" · ")}</span></summary>
+      <div className="form-stack small">
+        <p className="muted">{t("sections_intro")}</p>
+        <div className="toolbar"><button type="button" className="btn btn-small" disabled={busy} onClick={explore}>{busy ? "…" : t("sections_explore")}</button></div>
+        {err ? <p className="text-error">{err}</p> : null}
+        <div className="sections-list">
+          <span className="muted">{t("sections_current")}</span>
+          {current.map((u) => (
+            <label key={u} className="check" dir="ltr">
+              <input type="checkbox" checked={chosen.includes(u)} onChange={() => toggle(u)} />
+              <span>{decodeURI(u)}{isHome(u) ? <strong className="text-error"> · {t("sections_home_warning")}</strong> : null}</span>
+            </label>
+          ))}
+        </div>
+        {links ? (
+          <div className="sections-list">
+            {links.filter((l) => !current.includes(l.url)).map((l) => (
+              <label key={l.url} className="check" dir="auto">
+                <input type="checkbox" checked={chosen.includes(l.url)} onChange={() => toggle(l.url)} />
+                <span>{l.menu ? "☰ " : ""}<strong>{l.label}</strong> {l.inside ? <span className="muted">({l.inside} {t("sections_inside")})</span> : null}
+                  {" "}<a href={l.url} target="_blank" rel="noopener noreferrer" className="muted">↗</a></span>
+              </label>
+            ))}
+          </div>
+        ) : null}
+        <label>{t("sections_manual")}<input dir="ltr" value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="https://…" /></label>
+        <div className="toolbar spaced">
+          <button type="button" className="btn btn-primary btn-small" onClick={save}>{t("sections_use")} ({chosen.length + extra.split(/\s+/).filter((x) => x.startsWith("http")).length})</button>
+          {msg ? <span role="status">{msg}</span> : null}
+        </div>
       </div>
     </details>
   );
