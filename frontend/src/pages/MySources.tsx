@@ -15,6 +15,7 @@ interface MySource {
 interface StrictCfg {
   enabled: boolean; pillars: string[]; types: string[]; files_only: boolean; site_sections: string[];
   min_score: number; review: boolean; pause_below: number; min_judged: number;
+  keywords: string[]; keywords_mode: string; keywords_in: string; exclude: string[]; criteria: string;
 }
 interface PreviewItem { title: string; url: string; type: string; site_labels: string[]; score?: number; pillars?: string[]; reason?: string }
 interface Suggestion {
@@ -35,12 +36,13 @@ export default function MySources() {
     <div className="page">
       <div className="page-head">
         <h1>{t("nav_my_sources")}</h1>
-        <Link className="btn btn-primary" to="/sources">{t("add_my_source")}</Link>
+        <a className="btn btn-primary" href="#add-source" onClick={(e) => { e.preventDefault(); document.getElementById("add-source")?.setAttribute("open", ""); document.getElementById("add-source")?.scrollIntoView(); }}>{t("add_my_source")}</a>
       </div>
       <p className="muted">{t("my_sources_intro")}</p>
       <Async state={state}>
         {(d) => (
           <>
+            <AddSourceForm reload={state.reload} />
             <Catalog reload={state.reload} />
             <BulkWebsites reload={state.reload} />
             <Suggestions d={d} reload={state.reload} />
@@ -218,6 +220,8 @@ function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
   const { t, v } = useI18n();
   const [cfg, setCfg] = useState<StrictCfg>(s.strict);
   const [sections, setSections] = useState(s.strict.site_sections.join(", "));
+  const [kw, setKw] = useState((s.strict.keywords || []).join("\n"));
+  const [ex, setEx] = useState((s.strict.exclude || []).join("\n"));
   const [lock, setLock] = useState(Boolean(s.config.section_lock));
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -226,7 +230,8 @@ function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
   const isWeb = s.adapter === "web_crawler";
   const toggle = (k: "pillars" | "types", x: string) =>
     setCfg({ ...cfg, [k]: cfg[k].includes(x) ? cfg[k].filter((y) => y !== x) : [...cfg[k], x] });
-  const body = () => ({ ...cfg, site_sections: sections.split(/[,،\n]/).map((x) => x.trim()).filter(Boolean) });
+  const body = () => ({ ...cfg, site_sections: sections.split(/[,،\n]/).map((x) => x.trim()).filter(Boolean),
+    keywords: splitWords(kw), exclude: splitWords(ex) });
   const save = async () => {
     setErr(null); setMsg(null); setBusy(true);
     try {
@@ -258,6 +263,9 @@ function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
             <input dir="auto" value={sections} onChange={(e) => setSections(e.target.value)} placeholder="تربية الأبناء, الأسرة, Parenting, Family" />
           </label>
         ) : null}
+        <RulesFields kw={kw} setKw={setKw} ex={ex} setEx={setEx} mode={cfg.keywords_mode || "any"} setMode={(m) => setCfg({ ...cfg, keywords_mode: m })}
+          where={cfg.keywords_in || "title_description"} setWhere={(w) => setCfg({ ...cfg, keywords_in: w })}
+          criteria={cfg.criteria || ""} setCriteria={(c) => setCfg({ ...cfg, criteria: c })} />
         <fieldset className="check-row"><legend>{t("strict_pillars")}</legend>
           {PILLARS3.map((p) => <label key={p} className="check"><input type="checkbox" checked={cfg.pillars.includes(p)} onChange={() => toggle("pillars", p)} />{t(`pillar_${p}` as never)}</label>)}
         </fieldset>
@@ -405,6 +413,83 @@ function SectionPicker({ s, reload }: { s: MySource; reload: () => void }) {
         <div className="toolbar spaced">
           <button type="button" className="btn btn-primary btn-small" onClick={save}>{t("sections_use")} ({chosen.length + extra.split(/\s+/).filter((x) => x.startsWith("http")).length})</button>
           {msg ? <span role="status">{msg}</span> : null}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+const splitWords = (s: string) => s.split(/\n|,|،/).map((x) => x.trim()).filter(Boolean);
+
+function RulesFields(p: { kw: string; setKw: (s: string) => void; ex: string; setEx: (s: string) => void; mode: string;
+  setMode: (s: string) => void; where: string; setWhere: (s: string) => void; criteria: string; setCriteria: (s: string) => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="form-grid">
+      <label>{t("rules_keywords")}<textarea dir="auto" rows={4} value={p.kw} onChange={(e) => p.setKw(e.target.value)} placeholder={"تربية الأبناء\nالقدوة\nparenting"} />
+        <span className="muted">
+          <select value={p.mode} onChange={(e) => p.setMode(e.target.value)}>
+            <option value="any">{t("rules_any")}</option><option value="all">{t("rules_all")}</option>
+          </select>{" "}
+          <select value={p.where} onChange={(e) => p.setWhere(e.target.value)}>
+            <option value="title">{t("rules_in_title")}</option><option value="title_description">{t("rules_in_desc")}</option>
+            <option value="text">{t("rules_in_text")}</option>
+          </select>
+        </span>
+      </label>
+      <label>{t("rules_exclude")}<textarea dir="auto" rows={4} value={p.ex} onChange={(e) => p.setEx(e.target.value)} placeholder={"football\nأخبار"} /></label>
+      <label className="span-2">{t("rules_points")}<textarea dir="auto" rows={4} value={p.criteria} onChange={(e) => p.setCriteria(e.target.value)}
+        placeholder={t("rules_points_placeholder")} /><span className="muted">{t("rules_points_help")}</span></label>
+    </div>
+  );
+}
+
+function AddSourceForm({ reload }: { reload: () => void }) {
+  const { t } = useI18n();
+  const empty = { kind: "website", address: "", name: "", review: false, enable: false };
+  const [f, setF] = useState(empty);
+  const [pillars, setPillars] = useState<string[]>(["children", "parents", "murabbi"]);
+  const [kw, setKw] = useState("");
+  const [ex, setEx] = useState("");
+  const [mode, setMode] = useState("any");
+  const [where, setWhere] = useState("title_description");
+  const [criteria, setCriteria] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const submit = async () => {
+    setMsg(null);
+    try {
+      const r = await api.post<{ name: string }>("/api/my-sources/add", { ...f, pillars, keywords: splitWords(kw), exclude: splitWords(ex),
+        keywords_mode: mode, keywords_in: where, criteria });
+      setMsg({ ok: true, text: `${t("bulk_sites_added")}: ${r.name}. ${f.enable ? "" : t("add_form_off")}` });
+      setF(empty); setKw(""); setEx(""); setCriteria("");
+      reload();
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+  };
+  return (
+    <details id="add-source" className="card add-source">
+      <summary><strong>{t("add_form_title")}</strong></summary>
+      <div className="form-stack small">
+        <div className="form-grid">
+          <label>{t("add_form_kind")}
+            <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+              <option value="website">{t("add_kind_website")}</option><option value="youtube">YouTube</option>
+              <option value="telegram">Telegram</option><option value="rss">{t("add_kind_rss")}</option>
+            </select></label>
+          <label>{t("add_form_address")} *<input dir="ltr" value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })}
+            placeholder={f.kind === "website" ? "https://site.org/section" : f.kind === "youtube" ? "https://www.youtube.com/@channel" : f.kind === "telegram" ? "t.me/channel" : "https://site.org/feed"} /></label>
+          <label>{t("add_form_name")}<input dir="auto" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        </div>
+        <fieldset className="check-row"><legend>{t("strict_pillars")}</legend>
+          {PILLARS3.map((p) => <label key={p} className="check"><input type="checkbox" checked={pillars.includes(p)}
+            onChange={() => setPillars((c) => (c.includes(p) ? c.filter((x) => x !== p) : [...c, p]))} />{t(`pillar_${p}` as never)}</label>)}
+        </fieldset>
+        <RulesFields kw={kw} setKw={setKw} ex={ex} setEx={setEx} mode={mode} setMode={setMode} where={where} setWhere={setWhere}
+          criteria={criteria} setCriteria={setCriteria} />
+        <label className="check"><input type="checkbox" checked={f.review} onChange={(e) => setF({ ...f, review: e.target.checked })} /> {t("strict_review")}</label>
+        <label className="check"><input type="checkbox" checked={f.enable} onChange={(e) => setF({ ...f, enable: e.target.checked })} /> {t("add_form_enable")}</label>
+        <div className="toolbar spaced">
+          <button type="button" className="btn btn-primary" disabled={!f.address.trim() || !pillars.length} onClick={submit}>{t("add")}</button>
+          {msg ? <span className={msg.ok ? "" : "text-error"} role="status">{msg.text}</span> : null}
         </div>
       </div>
     </details>

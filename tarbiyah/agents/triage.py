@@ -37,6 +37,15 @@ def _candidates(session: Session, limit: int) -> list[Resource]:
         .order_by(Resource.discovered_at.desc()).limit(limit)).scalars().all()
 
 
+def _criteria(session: Session, r: Resource) -> str:
+    from ..models import Source
+
+    if not r.source_id:
+        return ""
+    src = session.get(Source, r.source_id)
+    return str(((src.config or {}).get("strict") or {}).get("criteria") or "").strip() if src else ""
+
+
 def pending_count(session: Session) -> int:
     return len(_candidates(session, 1000))
 
@@ -51,12 +60,19 @@ def _block(r: Resource) -> str:
 def triage_batch(session: Session, size: int = 20) -> dict[str, Any]:
     from ..ingest.manage import auto_curate
 
-    items = _candidates(session, size)
+    items = _candidates(session, size * 3)
     if not items:
         return {"triaged": 0}
+    # items from a source with its own "points to be considered" are judged together, with those points
+    crit = _criteria(session, items[0])
+    items = [r for r in items if _criteria(session, r) == crit][:size]
+    system = SYSTEM
+    if crit:
+        system += ("\nThe person who added the source of these items gave these points to be considered. Apply them "
+                   "strictly: items that do not meet them score below 30.\nPOINTS TO BE CONSIDERED:\n" + crit[:2000])
     content = "Items:\n<source>\n" + "\n".join(_block(r) for r in items) + "\n</source>"
     session.commit()  # release the write lock while waiting for the model
-    out: TriageBatch = claude().structured("triage", SYSTEM, content, TriageBatch, max_tokens=6000, effort="low")
+    out: TriageBatch = claude().structured("triage", system, content, TriageBatch, max_tokens=6000, effort="low")
     by_id = {r.id: r for r in items}
     done = 0
     for t in out.items:

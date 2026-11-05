@@ -1352,6 +1352,86 @@ def set_sections(sid: int, body: SectionsIn, s: Session = Depends(get_session)) 
     return {"start_urls": urls}
 
 
+class SimpleSourceIn(BaseModel):
+    kind: str = "website"  # website | youtube | telegram | rss
+    address: str
+    name: str = ""
+    pillars: list[str] = ["children", "parents", "murabbi"]
+    keywords: list[str] = []
+    keywords_mode: str = "any"
+    keywords_in: str = "title_description"
+    exclude: list[str] = []
+    criteria: str = ""
+    review: bool = False
+    enable: bool = False
+
+
+@app.post("/api/my-sources/add")
+def add_simple_source(body: SimpleSourceIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Add a website, YouTube channel, Telegram channel or feed with its own rules — no JSON needed."""
+    import re
+
+    from .. import strict
+    from ..sources.youtube import classify_link
+
+    addr = body.address.strip()
+    if not addr:
+        raise HTTPException(400, "Paste the address (link) of the source.")
+    if body.keywords_mode not in ("any", "all") or body.keywords_in not in ("title", "title_description", "text"):
+        raise HTTPException(400, "keywords_mode must be any/all; keywords_in title/title_description/text.")
+    if not body.pillars or not set(body.pillars) <= {"children", "parents", "murabbi"}:
+        raise HTTPException(400, "Choose at least one pillar.")
+    kind = body.kind
+    if kind == "website":
+        url = addr if addr.lower().startswith(("http://", "https://")) else "https://" + addr
+        dom = _site_domain(url)
+        if "." not in dom:
+            raise HTTPException(400, "That is not a website address.")
+        if _existing_site(s, url) and _site_domain(url) and urlsplit(url).path.strip("/") == "":
+            raise HTTPException(409, f"{dom} is already in your sources.")
+        path = urlsplit(url).path.strip("/")
+        adapter, cfg, name = "web_crawler", {"start_urls": [url], "allowed_domains": [dom], "section_lock": bool(path),
+                                            "use_sitemap": not path, "max_pages": 100, "min_interval_seconds": 2}, dom
+    elif kind == "youtube":
+        found = classify_link(addr)
+        if found is None:
+            raise HTTPException(400, "Paste a YouTube channel (UC… / @handle / channel link), playlist or video link.")
+        k, v = found
+        field = {"channel": "channel_ids", "handle": "channel_ids", "playlist": "playlist_ids", "video": "video_urls"}[k]
+        adapter, cfg, name = "youtube", {field: [addr if k == "video" else v]}, f"YouTube {v}"
+    elif kind == "telegram":
+        m = re.search(r"(?:t\.me/(?:s/)?|telegram\.me/|@)?([A-Za-z][A-Za-z0-9_]{4,31})/?$", addr)
+        if not m:
+            raise HTTPException(400, "Paste a public Telegram channel: t.me/name or @name.")
+        adapter, cfg, name = "telegram", {"channels": [m.group(1)]}, f"Telegram @{m.group(1)}"
+    elif kind == "rss":
+        url = addr if addr.lower().startswith(("http://", "https://")) else "https://" + addr
+        adapter, cfg, name = "rss", {"feeds": [url]}, _site_domain(url) + " (feed)"
+    else:
+        raise HTTPException(400, "kind must be website, youtube, telegram or rss")
+    a = ADAPTERS[adapter]
+    cfg = {**a.info.default_config, **cfg, "role": "monitor", "added_by": "user",
+           "strict": {**strict.DEFAULTS, "enabled": True, "pillars": body.pillars,
+                      "keywords": [w.strip() for w in body.keywords if w.strip()][:100],
+                      "keywords_mode": body.keywords_mode, "keywords_in": body.keywords_in,
+                      "exclude": [w.strip() for w in body.exclude if w.strip()][:100],
+                      "criteria": body.criteria.strip()[:2000], "review": body.review}}
+    problems = a.config_problems(cfg)
+    if problems:
+        raise HTTPException(400, " | ".join(problems))
+    base = re.sub(r"[^a-z0-9]+", "-", f"{adapter}-{name}".lower()).strip("-")[:90] or adapter
+    key, n = base, 1
+    while s.execute(select(Source).where(Source.key == key)).first():
+        n += 1
+        key = f"{base}-{n}"
+    src = Source(key=key, adapter=adapter, name=(body.name.strip() or name)[:300], enabled=body.enable, config=cfg,
+                 schedule_minutes=a.info.default_schedule_minutes,
+                 health="ready" if a.is_configured() else "needs_credentials", next_run_at=utcnow() if body.enable else None)
+    s.add(src)
+    s.flush()
+    return _source(src, s)
+
+
 class ApplyKeywordsIn(BaseModel):
     dry_run: bool = True
 

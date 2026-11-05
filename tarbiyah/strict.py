@@ -25,6 +25,11 @@ DEFAULTS: dict[str, Any] = {
     "min_score": 40,
     "review": False,
     "pause_below": 30,       # % precision under which the source pauses (0 = never)
+    "keywords": [],          # exact words/phrases (Arabic spelling variants match)
+    "keywords_mode": "any",  # any = at least one keyword; all = every keyword
+    "keywords_in": "title_description",  # title | title_description | text
+    "exclude": [],           # an item containing any of these is not kept
+    "criteria": "",          # "points to be considered": the person's own instructions for the AI check
     "min_judged": 20,
 }
 FILE_TYPES = {"document", "book", "book_chapter", "paper", "thesis", "report", "manual", "curriculum"}
@@ -45,6 +50,23 @@ def pre_save(cfg: dict[str, Any], d: Any) -> str | None:
         return f"kind '{d.resource_type}' not allowed"
     if cfg.get("files_only") and not _is_file(d):
         return "not a downloadable file"
+    where = cfg.get("keywords_in") or "title_description"
+    texts = [getattr(d, "title", None) or ""]
+    if where in ("title_description", "text"):
+        texts += [getattr(d, "description", None) or "", " ".join(getattr(d, "keywords", None) or [])]
+    if where == "text":
+        texts.append((getattr(d, "text", None) or "")[:30000])
+    words = [w for w in (cfg.get("keywords") or []) if str(w).strip()]
+    if words:
+        if (cfg.get("keywords_mode") or "any") == "all":
+            missing = [w for w in words if not matches_keywords([w], *texts)]
+            if missing:
+                return "missing keyword(s): " + ", ".join(missing[:5])
+        elif not matches_keywords(words, *texts):
+            return "none of the keywords"
+    bad = [w for w in (cfg.get("exclude") or []) if str(w).strip() and matches_keywords([w], *texts)]
+    if bad:
+        return "contains an excluded word: " + bad[0]
     sections = cfg.get("site_sections") or []
     if sections and not _is_file(d):  # files (PDFs) carry no site labels; they were found on section pages
         labels = (d.extra or {}).get("site_labels") or []
