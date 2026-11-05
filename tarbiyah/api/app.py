@@ -44,6 +44,7 @@ from ..models import (
     ResourcePillar,
     ResourceTopic,
     SearchLog,
+    SearchTopic,
     Source,
     Topic,
 )
@@ -357,6 +358,94 @@ def kids_corner_find(s: Session = Depends(get_session)) -> dict[str, Any]:
                   run_after=utcnow() + timedelta(minutes=2))
     return {"queued": n, "sources": [x.name for x in srcs],
             "message": f"{n} searches started in the background across {len(srcs)} source(s)."}
+
+
+# ============================================================== topic map
+
+def _topic(t: SearchTopic, st: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    return {"id": t.id, "pillar": t.pillar, "name_en": t.name_en, "name_ar": t.name_ar, "phrases_en": t.phrases_en,
+            "phrases_ar": t.phrases_ar, "enabled": t.enabled, "origin": t.origin,
+            "last_swept_at": t.last_swept_at.isoformat() if t.last_swept_at else None,
+            "stats": st.get(t.id, {"searches": 0, "returned": 0, "kept": 0, "new": 0, "yield_pct": None, "weak": False})}
+
+
+@app.get("/api/topics")
+def topics_list(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import topics as topic_map
+
+    topic_map.ensure_seeded(s)
+    st = topic_map.stats(s)
+    rows = s.execute(select(SearchTopic).order_by(SearchTopic.pillar, SearchTopic.id)).scalars().all()
+    return {"topics": [_topic(t, st) for t in rows]}
+
+
+class TopicIn(BaseModel):
+    pillar: str | None = None
+    name_en: str | None = None
+    name_ar: str | None = None
+    phrases_en: list[str] | None = None
+    phrases_ar: list[str] | None = None
+    enabled: bool | None = None
+
+
+def _apply_topic(t: SearchTopic, body: TopicIn) -> None:
+    from .. import topics as topic_map
+
+    if body.pillar is not None:
+        if body.pillar not in ("children", "parents", "murabbi"):
+            raise HTTPException(400, "pillar must be children, parents or murabbi")
+        t.pillar = body.pillar
+    for k in ("name_en", "name_ar"):
+        v = getattr(body, k)
+        if v is not None:
+            setattr(t, k, v.strip()[:300])
+    for k in ("phrases_en", "phrases_ar"):
+        v = getattr(body, k)
+        if v is not None:
+            clean = [p.strip() for p in v if p.strip()]
+            vague = [p for p in clean if topic_map.is_vague(p)]
+            if vague:
+                raise HTTPException(400, f"Too vague (one word): {', '.join(vague)}. Use phrases of two words or more.")
+            setattr(t, k, clean[:10])
+    if body.enabled is not None:
+        t.enabled = body.enabled
+    if not (t.phrases_en or t.phrases_ar):
+        raise HTTPException(400, "A topic needs at least one search phrase (Arabic or English).")
+
+
+@app.post("/api/topics")
+def topics_add(body: TopicIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import topics as topic_map
+
+    t = SearchTopic(pillar="children", name_en="", name_ar="", phrases_en=[], phrases_ar=[], origin="user")
+    _apply_topic(t, body)
+    if not (t.name_en or t.name_ar):
+        t.name_en = (t.phrases_en or t.phrases_ar)[0]
+    t.name_ar = t.name_ar or t.name_en
+    t.name_en = t.name_en or t.name_ar
+    s.add(t)
+    s.flush()
+    return _topic(t, topic_map.stats(s))
+
+
+@app.patch("/api/topics/{tid}")
+def topics_edit(tid: int, body: TopicIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import topics as topic_map
+
+    t = s.get(SearchTopic, tid)
+    if t is None:
+        raise _404("topic")
+    _apply_topic(t, body)
+    return _topic(t, topic_map.stats(s))
+
+
+@app.delete("/api/topics/{tid}")
+def topics_delete(tid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    t = s.get(SearchTopic, tid)
+    if t is None:
+        raise _404("topic")
+    s.delete(t)
+    return {"deleted": True}
 
 
 # ============================================================== courses

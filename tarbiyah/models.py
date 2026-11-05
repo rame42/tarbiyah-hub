@@ -353,9 +353,26 @@ class SearchLog(Base):
     new_resources: Mapped[int] = mapped_column(Integer, default=0)
     kept: Mapped[int | None] = mapped_column(Integer)  # results that passed the precision gate
     gate: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # why the others were not kept
+    topic_id: Mapped[int | None] = mapped_column(Integer, index=True)  # topic-map topic that produced the search
     status: Mapped[str] = mapped_column(String(20), default="ok")
     error: Mapped[str | None] = mapped_column(Text)
     executed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class SearchTopic(Base):
+    """The topic map: precise, multi-word search phrases per pillar (Arabic and English) for the large sources."""
+
+    __tablename__ = "search_topics"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pillar: Mapped[str] = mapped_column(String(20), index=True)
+    name_en: Mapped[str] = mapped_column(String(300))
+    name_ar: Mapped[str] = mapped_column(String(300))
+    phrases_en: Mapped[list[str]] = mapped_column(JSON, default=list)
+    phrases_ar: Mapped[list[str]] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    origin: Mapped[str] = mapped_column(String(20), default="seed")
+    last_swept_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class CrawlUrl(Base):

@@ -29,7 +29,8 @@ def query_key(adapter: str, q: str) -> str:
 
 def derive_queries(session: Session, q: ResearchQuestion, max_queries: int = 4) -> list[dict[str, str]]:
     """Use planner/AI queries when present, otherwise keywords from the question in both languages."""
-    out: list[dict[str, str]] = [sq for sq in (q.search_queries or []) if sq.get("query")]
+    # planner/AI queries; topic-map phrases (marked with topic_id) are reserved for the large sources
+    out: list[dict[str, str]] = [sq for sq in (q.search_queries or []) if sq.get("query") and not sq.get("topic_id")]
     if len(out) < 2:
         for text in filter(None, [q.text, q.text_alt]):
             kws = [t for t in tokens(text) if t not in _STOP and len(t) > 2][:6]
@@ -100,8 +101,13 @@ def enabled_search_sources(session: Session) -> list[Source]:
 
 
 def investigate(session: Session, q: ResearchQuestion, parent_job_id: int | None = None) -> dict:
+    from .. import topics as topic_map
+
     queries = derive_queries(session, q)
-    q.search_queries = queries
+    # large sources (databases, book libraries) only get the precise phrases of the question's closest topics
+    linked = topic_map.link(session, " ".join(filter(None, [q.text, q.text_alt])), q.pillars or None)
+    topic_queries = topic_map.queries_for(linked)
+    q.search_queries = queries + topic_queries
     sources = enabled_search_sources(session)
     limit = int(get_setting("max_results_per_search", session))
     paused = set(get_setting("paused_collectors", session) or [])
@@ -110,7 +116,8 @@ def investigate(session: Session, q: ResearchQuestion, parent_job_id: int | None
         if src.key in paused:
             continue
         a = ADAPTERS[src.adapter]
-        for sq in queries:
+        precise = a.info.kind in ("academic", "books", "catalog")
+        for sq in (topic_queries if precise else queries):
             if sq.get("lang") == "ar" and "ar" not in a.info.languages:
                 continue
             if recently_searched(session, src.adapter, sq["query"]):
@@ -118,7 +125,7 @@ def investigate(session: Session, q: ResearchQuestion, parent_job_id: int | None
                 continue
             queue.enqueue(session, "search_source",
                           {"source_id": src.id, "query": sq["query"], "lang": sq.get("lang"), "question_id": q.id,
-                           "limit": limit},
+                           "limit": limit, "topic_id": sq.get("topic_id")},
                           priority=45, group=src.key, parent_id=parent_job_id,
                           dedupe_key=f"search:{query_key(src.adapter, sq['query'])}")
             enqueued += 1

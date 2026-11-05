@@ -147,3 +147,9 @@ Google Books, Gutenberg) are searched precisely:
   the gate rest for two weeks (`research_rest_poor_sources`).
 - Sort & Clean → "Large sources" shows each source's searches, results, kept and precision, and can apply the gate
   to items collected earlier (preview first; archived, never deleted).
+
+## Topic map (Research Center → Topic map)
+The large sources are searched only with the precise, multi-word phrases of the topic map (45 starting topics,
+15 per pillar, Arabic and English; editable). Each research question uses its closest topics; one topic is also
+swept across the large sources every two hours. Single-word searches are refused. Each topic shows its searches,
+kept results and precision; topics whose results mostly fail the gate are marked "weak".

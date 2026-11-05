@@ -168,13 +168,18 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
         raise PermanentFailure("source no longer exists")
     adapter = ADAPTERS[src.adapter]
     log_row = SearchLog(adapter=src.adapter, query=p["query"], query_key=query_key(src.adapter, p["query"]),
-                        lang=p.get("lang"), question_id=p.get("question_id"))
+                        lang=p.get("lang"), question_id=p.get("question_id"), topic_id=p.get("topic_id"))
     s.add(log_row)
     src.last_run_at = utcnow()
     ctx.commit()
     from .. import scope
 
     precise = adapter.info.kind in ("academic", "books", "catalog")
+    from ..topics import is_vague
+
+    if precise and not p.get("raw") and is_vague(p["query"]):
+        log_row.status, log_row.error = "too_vague", "single-word searches are not sent to the large sources"
+        return {"skipped": "too vague"}
     query = p["query"] if (p.get("raw") or not precise) else scope.scoped_query(src.adapter, p["query"], p.get("lang"))
     try:
         if hasattr(adapter, "search_with"):  # searches that need the source's own configuration (Apify)
@@ -525,7 +530,25 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
     if s.get(_Setting, "_kids_corner_scanned") is None:  # once, for items collected before the shelf existed
         queue.enqueue(s, "kids_corner_scan", {}, priority=70, group="processing", dedupe_key="kids_corner_scan")
     from .. import scope
+    from .. import topics as topic_map
+    from ..agents.discovery import enabled_search_sources, recently_searched
 
+    topic = topic_map.next_sweep_topic(s)
+    if topic is not None:  # topic sweep: one topic of the map every two hours, across the large sources
+        large = [x for x in enabled_search_sources(s) if ADAPTERS[x.adapter].info.kind in ("academic", "books", "catalog")]
+        n = 0
+        for src in large:
+            for sq in topic_map.queries_for([topic], per_lang=2):
+                if sq["lang"] == "ar" and "ar" not in ADAPTERS[src.adapter].info.languages:
+                    continue
+                if recently_searched(s, src.adapter, sq["query"]):
+                    continue
+                queue.enqueue(s, "search_source", {"source_id": src.id, "query": sq["query"], "lang": sq["lang"],
+                                                   "limit": 15, "topic_id": topic.id},
+                              priority=70, group=src.key, dedupe_key=f"topic:{src.id}:{sq['query']}")
+                n += 1
+        topic.last_swept_at = utcnow()
+        out["topic_sweep"] = f"{topic.name_en}: {n} searches"
     sweep_row = s.get(_Setting, "_sweeps_at")
     if sweep_row is None or utcnow() - datetime.fromisoformat(sweep_row.value["at"]) > timedelta(days=14):
         # classified sweeps: subject headings and descriptors per pillar, every two weeks
