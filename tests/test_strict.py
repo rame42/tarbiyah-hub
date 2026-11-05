@@ -79,7 +79,7 @@ def test_strict_web_source_end_to_end(env):
             card = [x for x in c.get("/api/my-sources").json()["sources"] if x["id"] == src["id"]][0]
             assert card["to_review"] == 2 and card["items"] == 0  # nothing enters the library without approval
             stats = card["strict_stats"]
-            assert stats["passed"] == 2 and stats["rejected"] == 1 and stats["skipped_before_saving"] >= 2
+            assert stats["passed"] == 2 and stats["rejected"] == 2 and stats["skipped_before_saving"] >= 1  # + the PDF (no text)
             assert any("strict mode" in m for m in card["last_result"]["messages"])
             items = c.get("/api/review").json()["items"]
             keep = [x for x in items if x["title"].startswith("Raising")][0]
