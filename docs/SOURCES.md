@@ -153,3 +153,13 @@ The large sources are searched only with the precise, multi-word phrases of the 
 15 per pillar, Arabic and English; editable). Each research question uses its closest topics; one topic is also
 swept across the large sources every two hours. Single-word searches are refused. Each topic shows its searches,
 kept results and precision; topics whose results mostly fail the gate are marked "weak".
+
+## YouTube channels (menu → YouTube channels)
+- **Find channels**: searches YouTube for CHANNELS with the topic map's phrases (chosen pillars, children first) and
+  phrases learned from your channels' kept videos; keeps only channels that are Islamic AND about tarbiyah (rules,
+  or the AI when a key is set; at least 3 videos). Runs weekly by itself. Add or "Not interested" (never shown again).
+- Added channels have strict mode on. Per channel: **read only chosen playlists**, **skip videos shorter than N
+  minutes** (default 5), plus keywords / exclude words / points to be considered (My Sources → Strict mode).
+  Length and title/description rules are checked BEFORE captions are downloaded.
+- **Quota guard**: YouTube calls are counted (search 100 units, others 1) and stop at `youtube_daily_units` (9,000).
+- General YouTube search for research stays off.

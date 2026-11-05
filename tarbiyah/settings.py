@@ -64,6 +64,8 @@ DEFAULTS: dict[str, Any] = {
     "research_ai_gate": True,            # with an AI key: the AI judges each search's results before saving
     "research_skip_sources": ["crossref", "youtube", "youtube_courses"],  # not used for research searches
     "research_rest_poor_sources": True,  # sources whose results mostly fail the gate rest for two weeks
+    "youtube_daily_units": 9000,         # YouTube Data API quota used per day (Google gives 10,000 free)
+    "youtube_min_minutes": 5,            # channels: skip videos shorter than this (Shorts, clips); 0 = keep all
     "auto_add_sources": False,           # add strong source suggestions automatically
     "auto_add_min_mentions": 5,          # ...when mentioned by at least this many collected items
     # updates
@@ -183,6 +185,7 @@ LIMITS = {
     "ai_calls": "daily_ai_call_limit",
     "ai_cost_usd": "daily_ai_budget_usd",
     "apify_runs": "apify_daily_run_limit",
+    "youtube_units": "youtube_daily_units",
 }
 
 

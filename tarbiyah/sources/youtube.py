@@ -69,6 +69,15 @@ def parse_playlist(value: str) -> str | None:
     return v if PLAYLIST_ID.match(v) else None
 
 
+def iso_duration(value: str | None) -> int:
+    """ISO 8601 duration (PT1H2M3S) -> seconds; 0 when unknown (live/upcoming)."""
+    m = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", value or "")
+    if not m:
+        return 0
+    d, h, mi, s = (int(x or 0) for x in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + s
+
+
 def video_id_from_url(url: str) -> str | None:
     m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})", url or "")
     return m.group(1) if m else None
@@ -142,8 +151,68 @@ class YouTubeAdapter(SourceAdapter):
 
     # ------------------------------------------------------------------ Data API helpers (need a key)
     def _api(self, path: str, **params: Any) -> dict[str, Any]:
+        """YouTube Data API call, counted against the daily quota (search 100 units, other calls 1)."""
+        from ..db import session_scope
+        from ..http import BudgetExceeded
+        from ..settings import record_usage, within_budget
+
+        cost = 100 if path == "search" else 1
+        with session_scope() as s:
+            if not within_budget(s, "youtube_units", cost):
+                raise BudgetExceeded("Daily YouTube quota (youtube_daily_units) reached")
+        record_usage("youtube_units", cost)
         return http().get_json(f"{API}/{path}", params={**params, "key": get_config().youtube_api_key},
                                check_robots=False)
+
+    def durations(self, ids: list[str]) -> dict[str, int]:
+        """Video lengths in seconds (1 quota unit per 50 videos)."""
+        out: dict[str, int] = {}
+        for i in range(0, len(ids), 50):
+            data = self._api("videos", part="contentDetails", id=",".join(ids[i:i + 50]))
+            for it in data.get("items") or []:
+                out[it["id"]] = iso_duration((it.get("contentDetails") or {}).get("duration"))
+        return out
+
+    def _wanted(self, cfg: dict[str, Any], pairs: list[tuple[str, dict[str, Any]]], ctx: CollectContext) -> list[tuple[str, dict[str, Any]]]:
+        """Before captions are downloaded: drop short videos and videos failing your title/description rules."""
+        from .. import strict
+        from types import SimpleNamespace
+
+        if not pairs:
+            return pairs
+        mins = cfg.get("min_minutes")
+        if mins is None:
+            from ..settings import get_setting
+
+            mins = get_setting("youtube_min_minutes")
+        mins = float(mins or 0)
+        if mins and get_config().youtube_api_key:
+            try:
+                lengths = self.durations([v for v, _ in pairs])
+            except FetchError as e:
+                ctx.log(f"YouTube: could not read video lengths ({e})")
+                lengths = {}
+            short = [v for v, _ in pairs if v in lengths and 0 < lengths[v] < mins * 60]
+            if short:
+                ctx.log(f"YouTube: {len(short)} video(s) shorter than {mins:g} min skipped")
+            pairs = [(v, sn) for v, sn in pairs if v not in short]
+            for v, sn in pairs:
+                sn["_duration"] = lengths.get(v)
+        scfg = {**strict.DEFAULTS, **(cfg.get("strict") or {})}
+        if scfg.get("enabled") and scfg.get("keywords_in") != "text":
+            kept = []
+            for v, sn in pairs:
+                why = strict.pre_save(scfg, SimpleNamespace(title=sn.get("title"), description=sn.get("description"),
+                                                            keywords=[], resource_type="video", download_url=None,
+                                                            url=f"https://www.youtube.com/watch?v={v}",
+                                                            extra={"site_labels": ["youtube"]}))
+                if why and not why.startswith(("the site gives", "filed by the site", "kind ")):
+                    continue
+                kept.append((v, sn))
+            if len(kept) < len(pairs):
+                ctx.log(f"YouTube: {len(pairs) - len(kept)} video(s) skipped by your rules (before captions)")
+            pairs = kept
+        return pairs
 
     def _videos(self, ids: list[str], ctx: CollectContext, cfg: dict[str, Any]) -> Iterator[ResourceIn]:
         """Single videos: details from the Data API (key) or YouTube's public oEmbed (title and channel only)."""
@@ -199,17 +268,23 @@ class YouTubeAdapter(SourceAdapter):
 
         def emit(items: list[dict[str, Any]]) -> Iterator[ResourceIn]:
             nonlocal new_count
+            pairs = []
             for it in items:
-                sn, cd = it.get("snippet") or {}, it.get("contentDetails") or {}
+                sn, cd = dict(it.get("snippet") or {}), it.get("contentDetails") or {}
                 vid = cd.get("videoId") or (sn.get("resourceId") or {}).get("videoId")
                 if not vid or vid in seen or sn.get("title") in ("Private video", "Deleted video"):
                     continue
                 seen.add(vid)
                 new_count += 1
-                yield self._resource(vid, sn.get("title", ""), sn.get("description", ""),
-                                     sn.get("videoOwnerChannelTitle") or sn.get("channelTitle"),
-                                     cd.get("videoPublishedAt") or sn.get("publishedAt"), ctx.source_key,
-                                     ctx.source_id, bool(cfg.get("transcripts")), cfg.get("language"))
+                sn["_published"] = cd.get("videoPublishedAt") or sn.get("publishedAt")
+                pairs.append((vid, sn))
+            for vid, sn in self._wanted(cfg, pairs, ctx):
+                d = self._resource(vid, sn.get("title", ""), sn.get("description", ""),
+                                   sn.get("videoOwnerChannelTitle") or sn.get("channelTitle"), sn["_published"],
+                                   ctx.source_key, ctx.source_id, bool(cfg.get("transcripts")), cfg.get("language"))
+                if sn.get("_duration"):
+                    d.extra["duration_seconds"] = sn["_duration"]
+                yield d
 
         items, first_next = self._playlist_page(playlist, None)
         yield from emit(items)
@@ -323,15 +398,21 @@ class YouTubeAdapter(SourceAdapter):
                 ctx.log(f"YouTube feed failed for {value}: {e}")
                 continue
             feed = feedparser.parse(res.content)
+            pairs = []
             for e in feed.entries:
                 vid = e.get("yt_videoid") or video_id_from_url(e.get("link", ""))
                 if not vid or vid in seen:
                     continue
-                desc = e.get("media_description") or e.get("summary") or ""
-                yield self._resource(vid, e.get("title", ""), desc, feed.feed.get("title") or e.get("author"),
-                                     e.get("published"), ctx.source_key, ctx.source_id, bool(cfg.get("transcripts")),
-                                     cfg.get("language"))
                 seen.add(vid)
+                pairs.append((vid, {"title": e.get("title", ""), "_published": e.get("published"),
+                                    "description": e.get("media_description") or e.get("summary") or "",
+                                    "channelTitle": feed.feed.get("title") or e.get("author")}))
+            for vid, sn in self._wanted(cfg, pairs, ctx):
+                d = self._resource(vid, sn["title"], sn["description"], sn["channelTitle"], sn["_published"],
+                                   ctx.source_key, ctx.source_id, bool(cfg.get("transcripts")), cfg.get("language"))
+                if sn.get("_duration"):
+                    d.extra["duration_seconds"] = sn["_duration"]
+                yield d
         ctx.state["seen_ids"] = list(seen)[-20000:]
 
 

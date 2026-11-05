@@ -214,6 +214,8 @@ def test_youtube_channel_validation_and_full_history(env, monkeypatch):
         calls.append((path, params))
         if path == "channels":
             return {"items": [{"id": "UCcCfpDNl1Bi-LopV2noq_pg"}]}
+        if path == "videos":  # video lengths: all 10 minutes
+            return {"items": [{"id": v, "contentDetails": {"duration": "PT10M"}} for v in params["id"].split(",")]}
         assert params["playlistId"] == "UUcCfpDNl1Bi-LopV2noq_pg"
         ids, nxt = pages[params.get("pageToken")]
         return {"items": [{"snippet": {"title": f"Lesson {v}", "channelTitle": "Ch", "publishedAt": "2025-01-01T00:00:00Z"},
@@ -229,6 +231,7 @@ def test_youtube_channel_validation_and_full_history(env, monkeypatch):
     assert len(run2) == 30 and state["backfill"]["UUcCfpDNl1Bi-LopV2noq_pg"]["done"] is True
     assert list(a.collect(CollectContext(source_config=cfg, checkpoint={}, state=state))) == []
     assert sum(1 for c in calls if c[0] == "channels") == 1
+    assert run1[0].extra["duration_seconds"] == 600
 
 
 def test_youtube_single_video_links(env, monkeypatch):

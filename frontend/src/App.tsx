@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import History from "./pages/History";
 import Library from "./pages/Library";
 import Clean from "./pages/Clean";
+import YouTube from "./pages/YouTube";
 import Topics from "./pages/Topics";
 import Review from "./pages/Review";
 import KidsCorner from "./pages/KidsCorner";
@@ -29,6 +30,7 @@ const NAV: [string, TKey][] = [
   ["/history", "nav_history"],
   ["/library", "nav_library"],
   ["/my-sources", "nav_my_sources"],
+  ["/youtube", "nav_youtube"],
   ["/review", "nav_review"],
   ["/kids", "nav_kids"],
   ["/clean", "nav_clean"],
@@ -109,6 +111,7 @@ function Shell() {
               <Route path="/library" element={<Library />} />
               <Route path="/clean" element={<Clean />} />
               <Route path="/my-sources" element={<MySources />} />
+              <Route path="/youtube" element={<YouTube />} />
               <Route path="/review" element={<Review />} />
               <Route path="/kids" element={<KidsCorner />} />
               <Route path="/files" element={<Files />} />

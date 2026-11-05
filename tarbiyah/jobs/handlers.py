@@ -443,6 +443,19 @@ def kids_corner_scan(ctx: JobContext) -> dict[str, Any]:
     return {"shelved": shelved}
 
 
+@handler("youtube_discover")
+def youtube_discover_job(ctx: JobContext) -> dict[str, Any]:
+    """Find tarbiyah YouTube channels to suggest (the person approves each one)."""
+    from ..config import get_config
+    from ..youtube_channels import discover
+
+    if not get_config().youtube_api_key:
+        return {"skipped": "YouTube key not set"}
+    res = discover(ctx.session, ctx.payload.get("pillars"), int(ctx.payload.get("max_queries", 6)))
+    ctx.audit("discovery", "youtube_channels", f"{res['suggested']} channel suggestion(s) from {res['searched']} found")
+    return res
+
+
 @handler("triage")
 def triage_job(ctx: JobContext) -> dict[str, Any]:
     """AI relevance screening of new items, 20 per request (bounded per run and by the daily AI limits)."""
@@ -567,6 +580,16 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
         else:
             sweep_row.value = {"at": utcnow().isoformat()}
         out["sweeps"] = n
+    from ..config import get_config as _gc
+
+    yt_row = s.get(_Setting, "_youtube_discover_at")
+    if _gc().youtube_api_key and (yt_row is None or utcnow() - datetime.fromisoformat(yt_row.value["at"]) > timedelta(days=7)):
+        queue.enqueue(s, "youtube_discover", {"pillars": ["children", "parents", "murabbi"], "max_queries": 6},
+                      priority=75, group="youtube_channels", dedupe_key="youtube_discover")
+        if yt_row is None:
+            s.add(_Setting(key="_youtube_discover_at", value={"at": utcnow().isoformat()}))
+        else:
+            yt_row.value = {"at": utcnow().isoformat()}
     from ..agents.suggest import due as suggestions_due
 
     if suggestions_due(s):  # every 6 hours: learn similar sources from what the person's sources collected

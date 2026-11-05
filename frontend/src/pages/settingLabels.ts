@@ -40,6 +40,8 @@ export const SETTING_LABELS: Record<string, [string, string]> = {
   research_ai_gate: ["Large sources: the AI judges search results before saving", "المصادر الكبيرة: يحكم الذكاء الاصطناعي على النتائج قبل حفظها"],
   research_skip_sources: ["Sources not used for research searches", "مصادر لا تُستخدم في البحث"],
   research_rest_poor_sources: ["Rest sources whose results mostly fail the gate", "إيقاف المصادر التي تفشل معظم نتائجها مؤقتاً"],
+  youtube_daily_units: ["YouTube quota per day (units; Google gives 10,000)", "حصة يوتيوب اليومية (وحدات؛ تمنح جوجل 10000)"],
+  youtube_min_minutes: ["YouTube: skip videos shorter than (minutes)", "يوتيوب: تجاهل المقاطع الأقصر من (دقائق)"],
   ui_language: ["Dashboard language", "لغة لوحة التحكم"],
   auto_archive_below: ["Auto-archive new items below relevance (0 = off)", "أرشفة العناصر الجديدة تحت هذه الصلة (0 = متوقف)"],
   ai_triage: ["AI screens new items for relevance", "الذكاء الاصطناعي يفحص صلة العناصر الجديدة"],

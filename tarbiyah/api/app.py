@@ -530,7 +530,7 @@ def find_courses(body: FindCoursesIn, s: Session = Depends(get_session)) -> dict
     pairs = [(body.query.strip(), None)] if body.query and body.query.strip() else \
         [(q, lang) for lang, qs in COURSE_QUERIES.items() for q in qs]
     jobs = [queue.enqueue(s, "search_source", {"source_id": src.id, "query": q, "lang": lang, "limit": 15},
-                          priority=30, group="youtube", dedupe_key=f"search:{src.id}:{q}").id for q, lang in pairs]
+                          priority=30, group=src.key, dedupe_key=f"search:{src.id}:{q}").id for q, lang in pairs]
     return {"queued": len(jobs), "message": f"Searching for courses with {len(jobs)} search(es) in the background."}
 
 
@@ -1430,6 +1430,113 @@ def add_simple_source(body: SimpleSourceIn, s: Session = Depends(get_session)) -
     s.add(src)
     s.flush()
     return _source(src, s)
+
+
+# ============================================================== YouTube channels
+
+@app.get("/api/youtube")
+def youtube_overview(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_channels as yc
+    from ..ingest.manage import is_my_source
+    from ..settings import get_usage
+
+    st = yc._state(s)
+    running = s.execute(select(Job).where(Job.job_type == "youtube_discover", Job.status.in_(queue.ACTIVE))).first()
+    mine = []
+    for src in s.execute(select(Source).where(Source.adapter == "youtube")).scalars():
+        if not is_my_source(src):
+            continue
+        cfg = src.config or {}
+        n = s.execute(select(func.count()).select_from(Resource).where(Resource.source_id == src.id,
+                                                                       Resource.deleted.is_(False),
+                                                                       Resource.archived.is_(False))).scalar()
+        mine.append({"id": src.id, "name": src.name, "enabled": src.enabled, "health": src.health, "items": n,
+                     "channel_ids": cfg.get("channel_ids_origin") or cfg.get("channel_ids") or [],
+                     "playlist_ids": cfg.get("playlist_ids") or [], "only_playlists": bool(cfg.get("channel_ids_origin")),
+                     "min_minutes": cfg.get("min_minutes"), "strict": (cfg.get("strict") or {}).get("enabled", False)})
+    settings = get_all(s)
+    return {"key_set": bool(get_config().youtube_api_key), "suggestions": yc.suggestions(s),
+            "updated_at": st.get("updated_at"), "running": bool(running), "dismissed": len(st["dismissed"]),
+            "quota_used_today": int(get_usage(s, "youtube_units")), "quota_limit": settings["youtube_daily_units"],
+            "default_min_minutes": settings["youtube_min_minutes"], "channels": mine,
+            "learned": yc.learned_phrases(s)}
+
+
+class YtDiscoverIn(BaseModel):
+    pillars: list[str] = ["children", "parents", "murabbi"]
+    max_queries: int = 6
+
+
+@app.post("/api/youtube/discover")
+def youtube_discover(body: YtDiscoverIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    if not get_config().youtube_api_key:
+        raise HTTPException(400, "Finding channels needs the free YouTube key (Settings > Keys & AI).")
+    pills = [p for p in body.pillars if p in ("children", "parents", "murabbi")] or ["children"]
+    j = queue.enqueue(s, "youtube_discover", {"pillars": pills, "max_queries": max(1, min(body.max_queries, 20))},
+                      priority=20, group="youtube_channels", dedupe_key="youtube_discover")
+    return {"job_id": j.id, "message": "Looking for channels in the background (about a minute)."}
+
+
+class YtChannelIn(BaseModel):
+    channel_id: str
+    pillars: list[str] | None = None
+    min_minutes: float | None = None
+
+
+@app.post("/api/youtube/add")
+def youtube_add(body: YtChannelIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_channels as yc
+
+    return _source(yc.add(s, body.channel_id, body.pillars, body.min_minutes), s)
+
+
+@app.post("/api/youtube/dismiss")
+def youtube_dismiss(body: YtChannelIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_channels as yc
+
+    yc.dismiss(s, body.channel_id)
+    return {"ok": True}
+
+
+@app.get("/api/my-sources/{sid}/youtube-playlists")
+def youtube_playlists(sid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_channels as yc
+
+    src = s.get(Source, sid)
+    if src is None or src.adapter != "youtube":
+        raise HTTPException(400, "This is not a YouTube source.")
+    if not get_config().youtube_api_key:
+        raise HTTPException(400, "Listing playlists needs the free YouTube key (Settings > Keys & AI).")
+    s.commit()
+    return {"playlists": yc.playlists(s, src), "chosen": (src.config or {}).get("playlist_ids") or [],
+            "only_playlists": bool((src.config or {}).get("channel_ids_origin"))}
+
+
+class YtPlaylistsIn(BaseModel):
+    playlist_ids: list[str] = []
+    whole_channel: bool = False
+    min_minutes: float | None = None
+
+
+@app.put("/api/my-sources/{sid}/youtube-playlists")
+def youtube_set_playlists(sid: int, body: YtPlaylistsIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    src = s.get(Source, sid)
+    if src is None or src.adapter != "youtube":
+        raise HTTPException(400, "This is not a YouTube source.")
+    cfg = dict(src.config or {})
+    origin = cfg.get("channel_ids_origin") or cfg.get("channel_ids") or []
+    if body.whole_channel or not body.playlist_ids:
+        cfg["channel_ids"] = origin
+        cfg.pop("channel_ids_origin", None)
+        cfg["playlist_ids"] = [p for p in body.playlist_ids]
+    else:
+        cfg["channel_ids_origin"] = origin
+        cfg["channel_ids"] = []
+        cfg["playlist_ids"] = body.playlist_ids[:100]
+    if body.min_minutes is not None:
+        cfg["min_minutes"] = max(0.0, float(body.min_minutes))
+    src.config = cfg
+    return {"channel_ids": cfg["channel_ids"], "playlist_ids": cfg["playlist_ids"], "min_minutes": cfg.get("min_minutes")}
 
 
 class ApplyKeywordsIn(BaseModel):
