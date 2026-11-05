@@ -132,3 +132,18 @@ Only items passing **every** check are kept; the rest is not saved (or stays asi
 - **Review before adding**: items that pass wait in **To review** for ✔ / ✖ (✖ = removed, never collected again).
 - **Precision watch**: when fewer than the chosen % of judged items are relevant, the source pauses itself.
 - **Preview** shows what would be kept / rejected (with reasons) without saving anything.
+
+## Large sources: precise research searches
+Scholarly databases and book libraries (OpenAlex, DOAJ, ERIC, CORE, Internet Archive, Open Library,
+Google Books, Gutenberg) are searched precisely:
+- **Each source's own subject system + an Islamic anchor**: e.g. OpenAlex `(query) AND (Islam OR Islamic OR Muslim …)`,
+  ERIC descriptors `subject:"Islam"`, Open Library / Internet Archive library subject headings. If a service rejects
+  the precise form, the search falls back to the plain query and the gate still filters.
+- **Gate before saving**: a result is saved only if it is Islamic (anchor in title/abstract/subjects/journal; Arabic
+  results may pass on a higher pillar score) AND about a pillar (score ≥ `research_min_score`, default 25). With an
+  AI key, the AI judges each search's results in one request (`research_ai_gate`).
+- **Classified sweeps** every two weeks: subject headings / descriptors per pillar.
+- **Crossref and YouTube are not used for research** (`research_skip_sources`); sources whose results mostly fail
+  the gate rest for two weeks (`research_rest_poor_sources`).
+- Sort & Clean → "Large sources" shows each source's searches, results, kept and precision, and can apply the gate
+  to items collected earlier (preview first; archived, never deleted).

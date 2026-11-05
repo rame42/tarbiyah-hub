@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from ..ai.claude import AIBudgetExceeded, AIRefused, AIUnavailable, claude
 from ..db import utcnow
-from ..http import BudgetExceeded
+from ..http import BudgetExceeded, FetchError
 from ..ingest.extract import SUPPORTED_EXT
 from ..ingest.pipeline import AcquisitionError, acquire, import_local_file, process, register_with_content, save_inline_segments
 from ..ingest.registry import ResourceIn
@@ -172,12 +172,24 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
     s.add(log_row)
     src.last_run_at = utcnow()
     ctx.commit()
+    from .. import scope
+
+    precise = adapter.info.kind in ("academic", "books", "catalog")
+    query = p["query"] if (p.get("raw") or not precise) else scope.scoped_query(src.adapter, p["query"], p.get("lang"))
     try:
         if hasattr(adapter, "search_with"):  # searches that need the source's own configuration (Apify)
             items = adapter.search_with({**adapter.info.default_config, **(src.config or {})}, p["query"],
                                         p.get("lang"), int(p.get("limit", 15)), src.key, src.id)
         else:
-            items = adapter.search(p["query"], p.get("lang"), int(p.get("limit", 15)))
+            try:
+                items = adapter.search(query, p.get("lang"), int(p.get("limit", 15)))
+            except FetchError as e:
+                if query == p["query"] or e.status not in (400, 422):
+                    raise
+                # the service did not accept the precise search format: plain search; the gate still filters
+                log.warning("%s rejected the precise query (%s); using the plain query", src.adapter, e)
+                query = p["query"]
+                items = adapter.search(query, p.get("lang"), int(p.get("limit", 15)))
     except NotConfigured as e:
         log_row.status, log_row.error = "not_configured", str(e)
         src.health, src.last_error = "needs_credentials", str(e)  # shown on the Sources card
@@ -192,6 +204,10 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
         src.health, src.last_error = "error", log_row.error
         s.commit()
         raise
+    returned = len(items)
+    if precise:  # large sources: only Islamic AND pillar-relevant results are saved
+        items, reasons = scope.gate(s, items, p.get("lang"))
+        log_row.kept, log_row.gate = len(items), reasons or None
     new = 0
     for d in items:
         d.source_id = src.id
@@ -203,12 +219,12 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
             q = s.get(ResearchQuestion, p["question_id"])
             if q is not None and r.id not in (q.related_resource_ids or []):
                 q.related_resource_ids = [*(q.related_resource_ids or []), r.id][-200:]
-    log_row.results, log_row.new_resources = len(items), new
+    log_row.results, log_row.new_resources = returned, new
     src.health, src.last_success_at, src.last_error = "ok", utcnow(), None
     src.items_collected = (src.items_collected or 0) + new
-    ctx.audit("discovery", "search", f"{src.adapter} '{p['query']}' -> {len(items)} results, {new} new",
+    ctx.audit("discovery", "search", f"{src.adapter} '{query}' -> {returned} results, {len(items)} kept, {new} new",
               question_id=p.get("question_id"))
-    return {"results": len(items), "new": new}
+    return {"results": returned, "kept": len(items), "new": new}
 
 
 # ------------------------------------------------------------------ pipeline
@@ -508,6 +524,26 @@ def maintenance_job(ctx: JobContext) -> dict[str, Any]:
 
     if s.get(_Setting, "_kids_corner_scanned") is None:  # once, for items collected before the shelf existed
         queue.enqueue(s, "kids_corner_scan", {}, priority=70, group="processing", dedupe_key="kids_corner_scan")
+    from .. import scope
+
+    sweep_row = s.get(_Setting, "_sweeps_at")
+    if sweep_row is None or utcnow() - datetime.fromisoformat(sweep_row.value["at"]) > timedelta(days=14):
+        # classified sweeps: subject headings and descriptors per pillar, every two weeks
+        n = 0
+        for src in s.execute(select(Source).where(Source.enabled.is_(True))).scalars():
+            if (src.config or {}).get("role") != "search" or src.adapter not in scope.SWEEPS:
+                continue
+            if not ADAPTERS[src.adapter].is_configured():
+                continue
+            for qtext, lang in scope.SWEEPS[src.adapter]:
+                queue.enqueue(s, "search_source", {"source_id": src.id, "query": qtext, "lang": lang, "limit": 25, "raw": True},
+                              priority=70, group=src.key, dedupe_key=f"sweep:{src.id}:{qtext}")
+                n += 1
+        if sweep_row is None:
+            s.add(_Setting(key="_sweeps_at", value={"at": utcnow().isoformat()}))
+        else:
+            sweep_row.value = {"at": utcnow().isoformat()}
+        out["sweeps"] = n
     from ..agents.suggest import due as suggestions_due
 
     if suggestions_due(s):  # every 6 hours: learn similar sources from what the person's sources collected

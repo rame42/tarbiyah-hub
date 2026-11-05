@@ -66,10 +66,23 @@ def recently_searched(session: Session, adapter: str, query: str) -> bool:
 TRUSTED_KINDS = ("academic", "books", "catalog")
 
 
+def poor_sources(session: Session, days: int = 14, min_searches: int = 8, min_yield: float = 0.1) -> set[str]:
+    """Sources whose search results mostly failed the precision gate recently: they rest until the record ages."""
+    from sqlalchemy import func
+
+    rows = session.execute(select(SearchLog.adapter, func.count(), func.sum(SearchLog.results), func.sum(SearchLog.kept))
+                           .where(SearchLog.executed_at >= utcnow() - timedelta(days=days), SearchLog.kept.is_not(None),
+                                  SearchLog.status == "ok")
+                           .group_by(SearchLog.adapter)).all()
+    return {a for a, n, res, kept in rows if n >= min_searches and (res or 0) > 0 and (kept or 0) / res < min_yield}
+
+
 def enabled_search_sources(session: Session) -> list[Source]:
     from ..settings import get_setting
 
     trusted_only = bool(get_setting("research_trusted_only", session))
+    skip = set(get_setting("research_skip_sources", session) or [])
+    resting = poor_sources(session) if get_setting("research_rest_poor_sources", session) else set()
     rows = session.execute(select(Source).where(Source.enabled.is_(True))).scalars().all()
     out = []
     for s in rows:
@@ -77,6 +90,8 @@ def enabled_search_sources(session: Session) -> list[Source]:
         if not (a and a.supports("search") and a.is_configured()):
             continue
         if trusted_only and a.info.kind not in TRUSTED_KINDS:
+            continue
+        if s.adapter in skip or s.adapter in resting:
             continue
         role = (s.config or {}).get("role")
         if role == "search" or (role == "monitor" and (s.config or {}).get("use_for_research")):

@@ -60,6 +60,10 @@ DEFAULTS: dict[str, Any] = {
     "auto_archive_below": 0,             # new automatically collected items scoring below this are archived (0 = off)
     "ai_triage": True,                   # the AI screens new items for relevance (20 per request)
     "research_trusted_only": False,      # research searches only scholarly and book sources
+    "research_min_score": 25,            # large sources: minimum pillar score for a search result to be saved
+    "research_ai_gate": True,            # with an AI key: the AI judges each search's results before saving
+    "research_skip_sources": ["crossref", "youtube", "youtube_courses"],  # not used for research searches
+    "research_rest_poor_sources": True,  # sources whose results mostly fail the gate rest for two weeks
     "auto_add_sources": False,           # add strong source suggestions automatically
     "auto_add_min_mentions": 5,          # ...when mentioned by at least this many collected items
     # updates

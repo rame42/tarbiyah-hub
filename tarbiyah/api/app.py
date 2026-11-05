@@ -349,7 +349,8 @@ def kids_corner_find(s: Session = Depends(get_session)) -> dict[str, Any]:
     for src in srcs:
         for lang, qs in QUERIES.items():
             for qtext in qs:
-                queue.enqueue(s, "search_source", {"source_id": src.id, "query": qtext, "lang": lang, "limit": 15},
+                queue.enqueue(s, "search_source", {"source_id": src.id, "query": qtext, "lang": lang, "limit": 15,
+                                                   "raw": True},
                               priority=35, group=src.key, dedupe_key=f"search:{src.id}:{qtext}")
                 n += 1
     queue.enqueue(s, "kids_corner_scan", {}, priority=60, group="processing", dedupe_key="kids_corner_scan",
@@ -591,6 +592,62 @@ def _archive_low_stmt(body: ArchiveLowIn):
     return stmt
 
 
+def _search_precision(s: Session, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    from ..agents.discovery import poor_sources
+
+    since = utcnow() - timedelta(days=14)
+    rows = s.execute(select(SearchLog.adapter, func.count(), func.sum(SearchLog.results), func.sum(SearchLog.kept),
+                            func.sum(SearchLog.new_resources))
+                     .where(SearchLog.executed_at >= since, SearchLog.kept.is_not(None)).group_by(SearchLog.adapter)).all()
+    resting = poor_sources(s) if settings.get("research_rest_poor_sources") else set()
+    skip = set(settings.get("research_skip_sources") or [])
+    labels = {k: a.info.label for k, a in ADAPTERS.items()}
+    out = [{"adapter": a, "name": labels.get(a, a), "searches": n, "returned": int(r or 0), "kept": int(k or 0),
+            "new": int(nw or 0), "yield_pct": round(100 * (k or 0) / r) if r else None, "resting": a in resting,
+            "skipped": a in skip} for a, n, r, k, nw in rows]
+    return sorted(out, key=lambda x: -(x["returned"] or 0))
+
+
+class GateIn(BaseModel):
+    dry_run: bool = True
+
+
+@app.post("/api/curation/large-gate")
+def large_gate(body: GateIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Apply the large-source gate to results collected before it existed (archive, never delete)."""
+    from .. import scope
+    from ..ingest.manage import archive_resource
+    from ..search.fts import view_clause
+    from ..sources.base import matches_keywords
+
+    large = [k for k, a in ADAPTERS.items() if a.info.kind in ("academic", "books", "catalog")]
+    min_score = int(get_all(s).get("research_min_score") or 25)
+    off, reasons = [], {}
+    for r in s.execute(select(Resource).where(view_clause("active"), Resource.duplicate_of_id.is_(None),
+                                              Resource.source_key.in_(large))).scalars():
+        ex = r.extra or {}
+        if ex.get("relevance_user") is not None or ex.get("archived_by") == "user":
+            continue  # the person decided about this one
+        if ex.get("relevance_ai") is not None:
+            why = None if ex["relevance_ai"] >= 50 and r.pillars else "AI: not relevant enough"
+        elif not r.pillars or (r.relevance or 0) < min_score:
+            why = "not about a pillar"
+        else:
+            arabic = (r.language or "").startswith("ar")
+            ok = matches_keywords(scope.ANCHOR, r.title, r.description, " ".join(r.keywords or []), r.publisher,
+                                  ex.get("journal"), ex.get("venue"))
+            why = None if ok or (arabic and (r.relevance or 0) >= min_score + 10) else "no Islamic connection"
+        if why:
+            off.append((r, why))
+            reasons[why] = reasons.get(why, 0) + 1
+    if body.dry_run:
+        return {"would_archive": len(off), "reasons": reasons,
+                "examples": [{"id": r.id, "title": r.title, "reason": w} for r, w in off[:10]]}
+    for r, why in off:
+        archive_resource(s, r, by="user", reason=f"large-source gate: {why}")
+    return {"archived": len(off), "reasons": reasons}
+
+
 @app.get("/api/curation")
 def curation_summary(below: int = 20, s: Session = Depends(get_session)) -> dict[str, Any]:
     from ..search.fts import pillar_clause, view_clause
@@ -632,6 +689,7 @@ def curation_summary(below: int = 20, s: Session = Depends(get_session)) -> dict
         "focus_terms": settings["focus_terms"], "exclude_terms": settings["exclude_terms"],
         "auto_archive_below": settings["auto_archive_below"],
         "ai_triage": settings["ai_triage"], "research_trusted_only": settings["research_trusted_only"],
+        "search_precision": _search_precision(s, settings),
         "ai_screened": count(view_clause("all"), func.json_extract(Resource.extra, "$.relevance_ai").is_not(None)),
         "ai_available": claude().available(),
         "job_running": {"id": running.id, "checkpoint": running.checkpoint} if running else None,

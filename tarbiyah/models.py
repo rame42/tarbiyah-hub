@@ -351,6 +351,8 @@ class SearchLog(Base):
     question_id: Mapped[int | None] = mapped_column(Integer)
     results: Mapped[int] = mapped_column(Integer, default=0)
     new_resources: Mapped[int] = mapped_column(Integer, default=0)
+    kept: Mapped[int | None] = mapped_column(Integer)  # results that passed the precision gate
+    gate: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # why the others were not kept
     status: Mapped[str] = mapped_column(String(20), default="ok")
     error: Mapped[str | None] = mapped_column(Text)
     executed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

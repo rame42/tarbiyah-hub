@@ -22,6 +22,8 @@ interface Summary {
   ai_triage: boolean;
   research_trusted_only: boolean;
   ai_screened: number;
+  search_precision: { adapter: string; name: string; searches: number; returned: number; kept: number; new: number;
+    yield_pct: number | null; resting: boolean; skipped: boolean }[];
   ai_available: boolean;
   job_running: { id: number; checkpoint: Record<string, number> } | null;
 }
@@ -52,6 +54,7 @@ export default function Clean() {
             <SortStep d={d} reload={state.reload} />
             <ArchiveStep sources={d.sources} below={below} setBelow={setBelow} reload={state.reload} />
             <QualityStep d={d} reload={state.reload} />
+            <SearchPrecision d={d} />
             <TeachStep d={d} reload={state.reload} />
             <SourcesStep d={d} reload={state.reload} />
           </>
@@ -266,6 +269,51 @@ function QualityStep({ d, reload }: { d: Summary; reload: () => void }) {
         )}
         <ActionButton onRun={set({ research_trusted_only: false, auto_archive_below: 15 })}>{t("quality_balanced_btn")}</ActionButton>
       </div>
+    </Card>
+  );
+}
+
+function SearchPrecision({ d }: { d: Summary }) {
+  const { t } = useI18n();
+  const [prev, setPrev] = useState<{ would_archive: number; reasons: Record<string, number>; examples: { id: number; title: string; reason: string }[] } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const gate = async (dry: boolean) => {
+    const r = await api.post<{ would_archive?: number; archived?: number; reasons: Record<string, number>; examples?: { id: number; title: string; reason: string }[] }>(
+      "/api/curation/large-gate", { dry_run: dry });
+    if (dry) setPrev({ would_archive: r.would_archive || 0, reasons: r.reasons, examples: r.examples || [] });
+    else { setPrev(null); setMsg(`${t("archived_n")} ${fmtNum(r.archived || 0)}`); }
+    return r;
+  };
+  return (
+    <Card title={t("sp_title")}>
+      <p className="small">{t("sp_intro")}</p>
+      <div className="toolbar spaced">
+        <ActionButton className="btn" onRun={() => gate(true)}>{t("sp_apply_old")}</ActionButton>
+        {msg ? <span className="small" role="status">{msg}</span> : null}
+      </div>
+      {prev ? (
+        <div className="alert alert-warn small">
+          <p><strong>{fmtNum(prev.would_archive)}</strong> {t("sp_would_archive")} {Object.entries(prev.reasons).map(([k, n]) => `${k}: ${n}`).join(" · ")}</p>
+          <ul>{prev.examples.map((x) => <li key={x.id} dir="auto"><Link to={`/resources/${x.id}`}>{x.title}</Link> <span className="muted">({x.reason})</span></li>)}</ul>
+          {prev.would_archive ? <ActionButton className="btn btn-primary btn-small" onRun={() => gate(false)}>{t("archive_now")}</ActionButton> : null}
+        </div>
+      ) : null}
+      {!d.search_precision.length ? <p className="small muted">{t("sp_empty")}</p> : (
+        <TableWrap>
+          <table className="table">
+            <thead><tr><th>{t("source")}</th><th>{t("sp_searches")}</th><th>{t("sp_returned")}</th><th>{t("sp_kept")}</th><th>{t("sp_yield")}</th><th /></tr></thead>
+            <tbody>
+              {d.search_precision.map((x) => (
+                <tr key={x.adapter}>
+                  <td>{x.name}</td><td>{fmtNum(x.searches)}</td><td>{fmtNum(x.returned)}</td><td>{fmtNum(x.kept)}</td>
+                  <td>{x.yield_pct === null ? "—" : <span className={`badge badge-${x.yield_pct >= 40 ? "good" : x.yield_pct >= 15 ? "warn" : "bad"}`}>{x.yield_pct}%</span>}</td>
+                  <td className="small">{x.skipped ? t("sp_not_used") : x.resting ? t("sp_resting") : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      )}
     </Card>
   );
 }

@@ -28,7 +28,7 @@ from .conftest import drain
 class LocalSearch(SourceAdapter):
     """Search adapter over the local test website (stands in for an online index in tests)."""
 
-    info = AdapterInfo(name="local_search", label="Local test index", kind="academic", description="test",
+    info = AdapterInfo(name="local_search", label="Local test index", kind="web", description="test",
                        capabilities=("search",), resource_types=("article",), default_enabled=True)
 
     def __init__(self, base: str):
