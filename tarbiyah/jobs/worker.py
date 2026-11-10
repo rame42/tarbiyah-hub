@@ -83,6 +83,15 @@ class JobContext:
                                   detail=detail[:4000], **kw))
 
 
+def claude_ready() -> bool:
+    try:
+        from ..ai.claude import claude
+
+        return claude().available() and bool(get_setting("ai_triage"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def run_job(job_id: int, worker_id: str, stop_event: threading.Event) -> str:
     """Execute one claimed job and record its outcome. Returns final status."""
     from ..http import BudgetExceeded, FetchError, RobotsDisallowed
@@ -102,11 +111,15 @@ def run_job(job_id: int, worker_id: str, stop_event: threading.Event) -> str:
     retryable = True
     deferred: Deferred | None = None
     result: dict[str, Any] | None = None
+    manual = queue.MANUAL.set(bool(payload.get("manual")))
     try:
         with session_scope() as s:
             ctx = JobContext(job_id, job_type, payload, checkpoint, s, worker_id, lease,
                              time.monotonic() + timeout, stop_event)
             result = fn(ctx) or {}
+            if payload.get("manual") and job_type == "collect_source" and claude_ready():
+                # a test run: screen its new items now instead of waiting for the next maintenance round
+                queue.enqueue(s, "triage", {"max_batches": 10}, priority=30, group="ai", dedupe_key="triage")
     except Deferred as d:
         deferred = d
     except BudgetExceeded as e:
@@ -125,6 +138,7 @@ def run_job(job_id: int, worker_id: str, stop_event: threading.Event) -> str:
     except Exception as e:  # noqa: BLE001 - every failure must be recorded, never crash the worker
         error = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=6)}"
         retryable = getattr(e, "transient", True)
+    queue.MANUAL.reset(manual)
     flush_usage()
     with session_scope() as s:
         if deferred is not None:
@@ -205,14 +219,14 @@ class Worker:
                 self.running.pop(jid)
         started = 0
         with session_scope() as s:
-            if get_setting("paused", s):
-                return 0
+            paused = bool(get_setting("paused", s))
             in_hours = within_operating_hours(s)
             groups = blocked_groups(s)
         allowed = None if in_hours else sorted(SYSTEM_JOB_TYPES)
         while len(self.running) < self.concurrency and not self.stop_event.is_set():
             with session_scope() as s:
-                job = queue.claim(s, self.worker_id, int(get_setting("lease_seconds", s)), groups, allowed)
+                job = queue.claim(s, self.worker_id, int(get_setting("lease_seconds", s)), groups, allowed,
+                                  manual_only=paused)
                 jid = job.id if job else None
             if jid is None:
                 break

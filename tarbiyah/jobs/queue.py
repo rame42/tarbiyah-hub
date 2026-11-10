@@ -9,6 +9,7 @@ Guarantees:
 """
 from __future__ import annotations
 
+import contextvars
 import socket
 from datetime import datetime, timedelta
 from typing import Any
@@ -21,6 +22,10 @@ from ..models import Job
 
 ACTIVE = ("queued", "running")
 
+# Jobs the person started by hand ("Run now") are marked manual; so is every job they lead to (pages, files,
+# AI screening). While the dashboard is paused, only manual jobs run, so one source can be tested alone.
+MANUAL: contextvars.ContextVar[bool] = contextvars.ContextVar("tarbiyah_manual_job", default=False)
+
 
 def enqueue(session: Session, job_type: str, payload: dict[str, Any] | None = None, *, priority: int = 50,
             dedupe_key: str | None = None, group: str | None = None, run_after: datetime | None = None,
@@ -31,7 +36,10 @@ def enqueue(session: Session, job_type: str, payload: dict[str, Any] | None = No
         ).scalars().first()
         if existing:
             return existing
-    job = Job(job_type=job_type, payload=payload or {}, priority=priority, dedupe_key=dedupe_key, group=group,
+    payload = dict(payload or {})
+    if MANUAL.get():
+        payload["manual"] = True
+    job = Job(job_type=job_type, payload=payload, priority=priority, dedupe_key=dedupe_key, group=group,
               run_after=run_after or utcnow(), max_attempts=max_attempts, parent_id=parent_id, status="queued")
     session.add(job)
     session.flush()
@@ -39,10 +47,12 @@ def enqueue(session: Session, job_type: str, payload: dict[str, Any] | None = No
 
 
 def claim(session: Session, worker_id: str, lease_seconds: int, blocked_groups: list[str] | None = None,
-          allowed_types: list[str] | None = None) -> Job | None:
+          allowed_types: list[str] | None = None, manual_only: bool = False) -> Job | None:
     """Atomically take the next due job. Uses UPDATE ... RETURNING on a single row."""
     now = utcnow()
     conds = ["status = 'queued'", "run_after <= :now"]
+    if manual_only:
+        conds.append("json_extract(payload, '$.manual') = 1")
     params: dict[str, Any] = {"now": now, "lease": now + timedelta(seconds=lease_seconds), "wid": worker_id}
     if blocked_groups:
         names = []

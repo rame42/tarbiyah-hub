@@ -170,3 +170,46 @@ def test_worker_runs_as_independent_process_and_survives_kill(env, site):
     finally:
         if p.poll() is None:
             p.kill()
+
+
+def test_paused_runs_only_manual_jobs_and_their_follow_ups(env):
+    from tarbiyah.jobs.worker import HANDLERS, run_job
+
+    with session_scope() as s:
+        other = queue.enqueue(s, "x", priority=10)
+        mine = queue.enqueue(s, "follow_up_test", {"manual": True}, priority=50)
+    with session_scope() as s:
+        assert queue.claim(s, "h:1", 60, manual_only=True).id == mine.id
+        assert queue.claim(s, "h:1", 60, manual_only=True) is None  # the scheduled job waits
+    # a job started by hand marks the jobs it creates as manual too
+    HANDLERS["follow_up_test"] = lambda ctx: {"child": queue.enqueue(ctx.session, "child_test", {"n": 1}).id}
+    try:
+        run_job(mine.id, "h:1", __import__("threading").Event())
+    finally:
+        HANDLERS.pop("follow_up_test")
+    with session_scope() as s:
+        child = s.query(Job).filter(Job.job_type == "child_test").one()
+        assert child.payload["manual"] is True
+        assert queue.MANUAL.get() is False  # the flag does not leak into the next job on this thread
+        assert s.get(Job, other.id).status == "queued"
+
+
+def test_run_now_works_while_paused(env):
+    from fastapi.testclient import TestClient
+
+    from tarbiyah.api.app import app
+    from tarbiyah.models import Source
+
+    with session_scope() as s:
+        set_setting(s, "paused", True)
+        src = Source(key="t-web", adapter="web", name="t", enabled=False, config={"start_urls": ["https://x.test/"]})
+        s.add(src)
+        s.flush()
+        sid = src.id
+        old = queue.enqueue(s, "collect_source", {"source_id": sid}, dedupe_key=f"collect:{sid}", group="t-web", priority=40)
+    with TestClient(app) as c:
+        r = c.post(f"/api/sources/{sid}/run").json()
+    assert r["job_id"] == old.id and r["paused"]
+    with session_scope() as s:
+        assert s.get(Job, old.id).payload["manual"] is True
+        assert queue.claim(s, "h:1", 60, manual_only=True).id == old.id

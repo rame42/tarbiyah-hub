@@ -50,7 +50,7 @@ from ..models import (
 )
 from ..search.fts import SearchFilters, resource_brief, search
 from ..ai.claude import claude
-from ..settings import DEFAULTS, flush_usage, get_all, set_setting
+from ..settings import DEFAULTS, flush_usage, get_all, get_setting, set_setting
 from ..sources.registry import ADAPTERS, adapter_status, refresh_credential_health
 from ..storage import absolute
 from ..taxonomy import PILLAR_LABELS
@@ -1810,8 +1810,14 @@ def run_source(sid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
         raise _404("source")
     if (src.config or {}).get("role") == "search":
         raise HTTPException(400, "Search sources run when research questions are investigated.")
-    j = queue.enqueue(s, "collect_source", {"source_id": src.id}, priority=20, group=src.key, dedupe_key=f"collect:{src.id}")
-    return {"job_id": j.id}
+    j = queue.enqueue(s, "collect_source", {"source_id": src.id, "manual": True}, priority=20, group=src.key,
+                      dedupe_key=f"collect:{src.id}")
+    if not (j.payload or {}).get("manual"):  # an earlier scheduled run was waiting: start it now as yours
+        j.payload = {**(j.payload or {}), "manual": True}
+        j.priority = 20
+    paused = bool(get_setting("paused", s))
+    return {"job_id": j.id, "paused": paused,
+            "note": "Everything else stays paused; this source runs now." if paused else None}
 
 
 @app.get("/api/jobs")

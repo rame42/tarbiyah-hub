@@ -120,6 +120,12 @@ The **My Sources** tab lists the channels, websites, Telegram channels and feeds
   every 6 hours, or "Look for similar sources now"). Add or dismiss each; optionally add strong ones
   automatically (their items stay relevance-filtered and they are marked "added automatically").
 
+## Testing one source while everything is paused
+
+Research Center → **Pause** stops all automatic work. **Run now** on a source still works while paused: that
+source is collected, its pages and files are processed and (with an AI key) screened, and nothing else runs.
+This is the way to try a new source alone before resuming everything.
+
 ## Strict mode (My Sources → a source → "Strict mode")
 Only items passing **every** check are kept; the rest is not saved (or stays aside with the reason):
 1. **Stay in the section** (websites): only the section's list pages and the items listed on them are read.
