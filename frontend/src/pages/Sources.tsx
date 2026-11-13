@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, KV, Pre, useAsync } from "../components";
+import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, KV, Pre, TableWrap, useAsync } from "../components";
 import { useI18n } from "../i18n";
 
 interface AdapterInfo {
@@ -75,15 +75,13 @@ export default function Sources() {
           const monitor = list.filter((r) => r.role !== "search");
           return (
             <>
-              <Card title={`${t("monitored_sources")} (${monitor.length})`}>
+              <Card title={<>{t("monitored_sources")} <span className="muted count">{monitor.length}</span></>}>
                 <p className="muted small">{t("monitored_sources_help")}</p>
-                {monitor.length === 0 ? <p className="muted">{t("none")}</p> : (
-                  <div className="src-grid">{monitor.map((s) => <SourceCard key={s.id} s={s} onUpdate={update} onDeleted={state.reload} />)}</div>
-                )}
+                {monitor.length === 0 ? <p className="empty">{t("none")}</p> : <SourceTable rows={monitor} onUpdate={update} onDeleted={state.reload} />}
               </Card>
-              <Card title={`${t("search_sources")} (${search.length})`}>
+              <Card title={<>{t("search_sources")} <span className="muted count">{search.length}</span></>}>
                 <p className="muted small">{t("search_sources_help")}</p>
-                <div className="src-grid">{search.map((s) => <SourceCard key={s.id} s={s} onUpdate={update} onDeleted={state.reload} />)}</div>
+                <SourceTable rows={search} onUpdate={update} onDeleted={state.reload} />
               </Card>
             </>
           );
@@ -94,7 +92,97 @@ export default function Sources() {
   );
 }
 
-function SourceCard({ s, onUpdate, onDeleted }: { s: SourceRow; onUpdate: (s: SourceRow) => void; onDeleted: () => void }) {
+type SortKey = "name" | "health" | "last_run_at" | "items_collected";
+const PROBLEM = new Set(["error", "needs_credentials", "waiting"]);
+
+/** Sources as a scannable table: filter, sort by column, open a row for its full details and actions. */
+function SourceTable({ rows, onUpdate, onDeleted }: { rows: SourceRow[]; onUpdate: (s: SourceRow) => void; onDeleted: () => void }) {
+  const { t } = useI18n();
+  const [q, setQ] = useState("");
+  const [show, setShow] = useState<"all" | "enabled" | "problems">("all");
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
+  const [open, setOpen] = useState<number | null>(null);
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = rows.filter((r) => (show === "all" || (show === "enabled" ? r.enabled : PROBLEM.has(r.health)))
+      && (!needle || `${r.name} ${r.key} ${r.adapter_info?.label || r.adapter}`.toLowerCase().includes(needle)));
+    const val = (r: SourceRow) => (sort.key === "items_collected" ? r.items_collected : String(r[sort.key] ?? ""));
+    return [...list].sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sort.dir);
+  }, [rows, q, show, sort]);
+  const counts = { all: rows.length, enabled: rows.filter((r) => r.enabled).length, problems: rows.filter((r) => PROBLEM.has(r.health)).length };
+  const th = (key: SortKey, label: string, cls = "") => (
+    <th className={cls} aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button type="button" className="th-sort" onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === "name" ? 1 : -1 }))}>
+        {label}<span className="sort-mark" aria-hidden="true">{sort.key === key ? (sort.dir === 1 ? "↑" : "↓") : ""}</span>
+      </button>
+    </th>
+  );
+  return (
+    <>
+      <div className="table-tools">
+        <input type="search" placeholder={t("filter")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("filter")} />
+        <div className="seg" role="group">
+          {(["all", "enabled", "problems"] as const).map((k) => (
+            <button key={k} type="button" className={show === k ? "active" : ""} aria-pressed={show === k} onClick={() => setShow(k)}>
+              {k === "all" ? t("all") : k === "enabled" ? t("enabled") : t("needs_attention")} <span className="seg-n">{counts[k]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <TableWrap>
+        <table className="data-table">
+          <thead>
+            <tr>
+              {th("name", t("source"))}
+              {th("health", t("status"))}
+              {th("last_run_at", t("last_run"))}
+              <th>{t("next_run")}</th>
+              {th("items_collected", t("items_collected"), "num")}
+              <th className="num">{t("active_jobs")}</th>
+              <th aria-hidden="true" />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 ? <tr><td colSpan={7} className="muted">{t("none")}</td></tr> : null}
+            {shown.map((s) => (
+              <Fragment key={s.id}>
+                <tr className={`clickable ${open === s.id ? "row-open" : ""} ${s.enabled ? "" : "row-dim"}`} onClick={() => setOpen(open === s.id ? null : s.id)}>
+                  <td>
+                    <button type="button" className="row-title" aria-expanded={open === s.id} onClick={(e) => { e.stopPropagation(); setOpen(open === s.id ? null : s.id); }}>
+                      <span dir="auto">{s.name}</span>
+                    </button>
+                    <div className="muted small">{s.adapter_info?.label || s.adapter}</div>
+                  </td>
+                  <td className="nowrap">
+                    <span className="badges">
+                      <Badge value={s.health} />
+                      {!s.enabled ? <Badge tone="muted">{t("disabled")}</Badge> : null}
+                      {s.paused ? <Badge tone="warn">{t("paused")}</Badge> : null}
+                      {s.adapter_info?.paid ? <Badge tone="warn">{t("paid_source")}</Badge> : null}
+                    </span>
+                  </td>
+                  <td className="nowrap muted">{fmtDate(s.last_run_at)}</td>
+                  <td className="nowrap muted">{fmtDate(s.next_run_at)}</td>
+                  <td className="num">{fmtNum(s.items_collected)}</td>
+                  <td className="num">{s.active_jobs ? fmtNum(s.active_jobs) : <span className="muted">—</span>}</td>
+                  <td className="chev-cell"><span className={`chev ${open === s.id ? "open" : ""}`} aria-hidden="true" /></td>
+                </tr>
+                {open === s.id ? (
+                  <tr className="detail-row">
+                    <td colSpan={7}><SourceCard s={s} onUpdate={onUpdate} onDeleted={onDeleted} bare /></td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+      <p className="muted small table-note">{shown.length} / {rows.length} · {t("click_row")}</p>
+    </>
+  );
+}
+
+function SourceCard({ s, onUpdate, onDeleted, bare }: { s: SourceRow; onUpdate: (s: SourceRow) => void; onDeleted: () => void; bare?: boolean }) {
   const { t, v } = useI18n();
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -110,8 +198,8 @@ function SourceCard({ s, onUpdate, onDeleted }: { s: SourceRow; onUpdate: (s: So
   const isMonitor = s.role !== "search";
 
   return (
-    <div className={`src-card ${s.enabled ? "" : "src-disabled"}`}>
-      <div className="src-head">
+    <div className={bare ? "src-detail" : `src-card ${s.enabled ? "" : "src-disabled"}`}>
+      <div className="src-head" style={bare ? { display: "none" } : undefined}>
         <strong dir="auto">{s.name}</strong>
         <Badge value={s.health} />
         {s.paused ? <Badge tone="warn">{t("paused")}</Badge> : null}

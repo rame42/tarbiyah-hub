@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, getMeta, Meta, qs, ResourceBrief } from "../api";
-import { ActionButton, Async, Card, ErrorBox, fmtTimestamp, Pager, ResourceItem, useAsync, videoUrlAt } from "../components";
+import { ActionButton, Async, Card, ErrorBox, fmtNum, fmtTimestamp, Pager, ResourceItem, useAsync, videoUrlAt } from "../components";
 import { useI18n } from "../i18n";
 
 interface SearchResult {
@@ -43,6 +43,7 @@ export default function Library() {
     if (val) filters[k] = val;
   });
   const view = sp.get("show_deleted") === "true" ? "deleted" : sp.get("view") || "active";
+  const [adding, setAdding] = useState(false);
   const key = sp.toString();
   const state = useAsync(
     () => api.get<SearchResponse>(`/api/resources${qs({ q, ...filters, page, page_size: PAGE_SIZE, cross_language: crossLanguage })}`),
@@ -81,13 +82,37 @@ export default function Library() {
   );
 
   const types = Array.from(new Set([...(m?.resource_types || []), ...RESOURCE_TYPES]));
+  const chipLabel: Record<string, [string, (x: string) => string]> = {
+    language: [t("language"), (x) => ({ ar: t("lang_ar"), en: t("lang_en"), mixed: t("lang_mixed") } as Record<string, string>)[x] || x],
+    pillar: [t("pillar"), (x) => (["children", "parents", "murabbi"].includes(x) ? t(`pillar_${x}` as "pillar_children") : t("unclassified_np"))],
+    type: [t("resource_type"), v], access: [t("access_status"), v], source: [t("source"), (x) => x],
+    topic: [t("topic"), (x) => { const tp = m?.topics?.find((o) => String(o.id) === x); return tp ? (lang === "ar" ? tp.name_ar : tp.name_en) : x; }],
+    status: [t("processing_status"), v], label: [t("label"), (x) => x],
+    min_relevance: [t("min_relevance"), (x) => x], max_relevance: [t("max_relevance"), (x) => x],
+    date_from: [t("date_from"), (x) => x], date_to: [t("date_to"), (x) => x],
+  };
+  const activeChips: [string, string][] = Object.entries(filters)
+    .filter(([k]) => chipLabel[k])
+    .map(([k, val]) => [k, `${chipLabel[k][0]}: ${chipLabel[k][1](val)}`]);
 
   return (
     <div className="page">
       <div className="page-head">
-        <h1>{t("library_title")}</h1>
+        <div>
+          <h1>{t("library_title")}</h1>
+          <p className="page-sub">{t("library_sub")}</p>
+        </div>
+        <button type="button" className={adding ? "btn" : "btn btn-primary"} aria-expanded={adding} onClick={() => setAdding((x) => !x)}>
+          {adding ? t("close") : t("add_to_library")}
+        </button>
       </div>
-      <Card>
+      {adding ? (
+        <div className="grid-2 add-panel">
+          <UploadForm />
+          <AddByUrlForm />
+        </div>
+      ) : null}
+      <Card className="search-card">
         <form className="search-form" onSubmit={onSearch} role="search">
           <input
             type="search"
@@ -105,8 +130,8 @@ export default function Library() {
           </label>
         </form>
         <ErrorBox error={meta.error} />
-        <details className="filters" open={Object.keys(filters).length > 0}>
-          <summary>{t("filters")}{Object.keys(filters).length ? ` (${Object.keys(filters).length})` : ""}</summary>
+        <details className="filters">
+          <summary>{t("filters")}{activeChips.length ? ` (${activeChips.length})` : ""}</summary>
           <div className="form-grid">
             {sel("language", t("language"), [["ar", t("lang_ar")], ["en", t("lang_en")], ["mixed", t("lang_mixed")]])}
             {sel("pillar", t("pillar"), [["children", t("pillar_children")], ["parents", t("pillar_parents")], ["murabbi", t("pillar_murabbi")], ["none", t("unclassified_np")]])}
@@ -116,22 +141,6 @@ export default function Library() {
             {sel("topic", t("topic"), (m?.topics || []).map((x) => [String(x.id), lang === "ar" ? x.name_ar : x.name_en]))}
             {sel("status", t("processing_status"), PROCESSING_VALUES.map((x) => [x, v(x)]))}
             {sel("label", t("label"), (labelList.data || []).map((x) => [x.label, `${x.label} (${x.count})`]))}
-            <label className="field">
-              <span>{t("lib_view")}</span>
-              <select value={view} onChange={(e) => update({ view: e.target.value === "active" ? null : e.target.value, show_deleted: null })}>
-                <option value="active">{t("view_active")}</option>
-                <option value="archived">{t("view_archived")}</option>
-                <option value="deleted">{t("view_deleted")}</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>{t("sort_by")}</span>
-              <select value={sp.get("sort") || "newest"} onChange={(e) => update({ sort: e.target.value === "newest" ? null : e.target.value })}>
-                {["newest", "oldest", "relevance_low", "relevance_high"].map((x) => (
-                  <option key={x} value={x}>{t(`sort_${x}` as never)}</option>
-                ))}
-              </select>
-            </label>
             <label className="field">
               <span>{t("min_relevance")}</span>
               <input type="number" min={0} max={100} value={sp.get("min_relevance") || ""} title={t("relevance_help")}
@@ -156,6 +165,39 @@ export default function Library() {
           </button>
         </details>
       </Card>
+
+      {activeChips.length ? (
+        <div className="filter-chips" aria-label={t("filters")}>
+          {activeChips.map(([k, label]) => (
+            <button key={k} type="button" className="filter-chip" onClick={() => update({ [k]: null, page: null })} title={t("clear")}>
+              <span dir="auto">{label}</span><span aria-hidden="true">×</span>
+            </button>
+          ))}
+          <button type="button" className="linklike small" onClick={() => setSp(new URLSearchParams(q ? { q } : {}))}>{t("clear")}</button>
+        </div>
+      ) : null}
+
+      <div className="results-bar">
+        <div className="tabs" role="tablist">
+          {(["active", "archived", "deleted"] as const).map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={view === k} className={view === k ? "tab active" : "tab"}
+              onClick={() => update({ view: k === "active" ? null : k, show_deleted: null, page: null })}>
+              {t(`tab_${k}` as never)}
+            </button>
+          ))}
+        </div>
+        <div className="results-meta">
+          {state.data ? <span className="muted small">{fmtNum(state.data.total)} {t("results")}</span> : null}
+          <label className="inline-field">
+            <span className="sr-only">{t("sort_by")}</span>
+            <select value={sp.get("sort") || "newest"} aria-label={t("sort_by")} onChange={(e) => update({ sort: e.target.value === "newest" ? null : e.target.value })}>
+              {["newest", "oldest", "relevance_low", "relevance_high"].map((x) => (
+                <option key={x} value={x}>{t(`sort_${x}` as never)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
 
       <Async state={state}>
         {(d) => (
@@ -200,10 +242,6 @@ export default function Library() {
         )}
       </Async>
 
-      <div className="grid-2">
-        <UploadForm />
-        <AddByUrlForm />
-      </div>
     </div>
   );
 }

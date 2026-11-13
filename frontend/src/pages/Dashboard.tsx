@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs, ResourceBrief, Status } from "../api";
-import { ActionButton, Async, Badge, Bars, Card, CountList, fmtDate, fmtNum, PillarBadges, ResourceItem, Stat, TableWrap, useAsync } from "../components";
+import { ActionButton, Async, Badge, CountList, fmtDate, fmtNum, PillarBadges, ResourceItem, Stat, TableWrap, useAsync } from "../components";
 import { useI18n } from "../i18n";
 
 interface Stats {
@@ -90,7 +91,10 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>{t("dash_title")}</h1>
+        <div>
+          <h1>{t("dash_title")}</h1>
+          <p className="page-sub">{fmtDate(day + "T12:00:00", false)}{isToday ? ` · ${t("auto_refresh")}` : ""}</p>
+        </div>
         <div className="toolbar">
           <button type="button" className="btn" onClick={() => go(shiftDay(day, -1))}>
             <span className="flip" aria-hidden="true">‹</span> {t("prev_day")}
@@ -109,12 +113,11 @@ export default function Dashboard() {
           ) : null}
           {state.data ? (
             state.data.live ? (
-              <Badge tone="good">● {t("live")}</Badge>
+              <Badge tone="good"><span className="dot dot-good" aria-hidden="true" /> {t("live")}</Badge>
             ) : (
               <Badge tone="neutral">{t("stored")}</Badge>
             )
           ) : null}
-          {isToday ? <span className="muted small">{t("auto_refresh")}</span> : null}
         </div>
       </div>
       <Async state={state}>{(d) => <DashboardBody d={d} reload={state.reload} />}</Async>
@@ -183,53 +186,133 @@ function DashboardBody({ d, reload }: { d: DashboardData; reload: () => void }) 
   const act = st.activity;
   const gaps = st.gaps;
   const plan = d.plan || {};
+  const [pillar, setPillar] = useState<string>("all");
+  const [showAll, setShowAll] = useState(false);
+
+  const pillarCounts: Record<string, number> = {};
+  disc.items.forEach((r) => (r.pillars || []).forEach((p) => {
+    const k = typeof p === "string" ? p : p.pillar;
+    pillarCounts[k] = (pillarCounts[k] || 0) + 1;
+  }));
+  const filtered = pillar === "all" ? disc.items
+    : disc.items.filter((r) => (r.pillars || []).some((p) => (typeof p === "string" ? p : p.pillar) === pillar));
+  const visible = showAll ? filtered : filtered.slice(0, 12);
+  const breakdowns: [string, Record<string, number>][] = [
+    [t("by_type"), disc.by_type], [t("by_language"), disc.by_language],
+    [t("by_source"), disc.by_source], [t("by_access"), disc.by_access], [t("entities_found"), disc.entities],
+  ];
+  const hasResearch = Object.values(res).some((x) => typeof x === "number" && x > 0) || res.findings_list.length > 0;
+  const planEmpty = !d.plan || Object.keys(d.plan).length === 0;
 
   return (
     <>
       <StatusStrip s={d.status} />
 
-      {d.previous ? (
-        <Card title={`${t("yesterday")} — ${d.previous.day}`} className="card-muted" actions={<Badge tone={d.previous.finalized ? "good" : "neutral"}>{d.previous.finalized ? t("finalized") : t("not_finalized")}</Badge>}>
-          <p dir="auto">{d.previous.summary || t("nothing_yet")}</p>
-          <Link to={`/day/${d.previous.day}`}>{t("open_day")}</Link>
-        </Card>
-      ) : null}
-
-      <div className="grid-2">
-        <Card title={t("discoveries")}>
-          <div className="stats-row">
-            <Stat label={t("new_resources")} value={fmtNum(disc.total)} />
-            <Stat label={t("paid_catalogued")} value={fmtNum(disc.paid_catalogued)} />
-          </div>
-          <div className="kv-compact">
-            <div><strong>{t("by_type")}:</strong> <CountList data={disc.by_type} /></div>
-            <div><strong>{t("by_language")}:</strong> <CountList data={disc.by_language} /></div>
-            <div><strong>{t("by_source")}:</strong> <CountList data={disc.by_source} /></div>
-            <div><strong>{t("by_access")}:</strong> <CountList data={disc.by_access} /></div>
-            <div><strong>{t("entities_found")}:</strong> <CountList data={disc.entities} /></div>
-          </div>
-          <h3>{t("new_institutions")}</h3>
-          <EntityChips list={disc.institutions} />
-          <h3>{t("new_experts")}</h3>
-          <EntityChips list={disc.experts} />
-        </Card>
-
-        <Card title={t("pillar_breakdown")}>
-          <Bars data={st.pillars} labels={(k) => t(pillarLabelKey(k))} colorFor={(k) => `fill-${k}`} />
-        </Card>
+      <div className="stats-row headline">
+        <Link className="stat-link" to="/library"><Stat label={t("new_resources")} value={fmtNum(disc.total)} /></Link>
+        <Stat label={t("downloaded")} value={fmtNum(act.downloaded)} />
+        <Stat label={t("processed")} value={fmtNum(act.processed)} />
+        <Link className="stat-link" to="/questions"><Stat label={t("q_answered")} value={fmtNum(res.questions_answered)} sub={`${fmtNum(res.open_questions)} ${t("open_questions").toLowerCase()}`} /></Link>
+        <Stat label={t("findings")} value={fmtNum(res.findings)} sub={`${fmtNum(res.findings_with_verified_evidence)} ${t("findings_verified").toLowerCase()}`} />
+        <Link className="stat-link" to="/jobs"><Stat label={t("failed_jobs")} value={fmtNum(act.failed_jobs.length)} sub={`${fmtNum(act.pending_jobs)} ${t("pending_jobs").toLowerCase()}`} /></Link>
       </div>
 
-      <Card title={`${t("new_items")} (${disc.items.length})`}>
-        {disc.items.length === 0 ? <p className="muted">{t("nothing_yet")}</p> : (
-          <div className="res-list">
-            {disc.items.map((r) => <ResourceItem key={r.id} r={r} />)}
-          </div>
-        )}
-      </Card>
+      <div className="dash-layout">
+        <section className="dash-main card">
+          <header className="card-head">
+            <h2>{t("new_items")} <span className="muted count">{fmtNum(disc.items.length)}</span></h2>
+          </header>
+          {disc.items.length === 0 ? <p className="empty">{t("nothing_yet")}</p> : (
+            <>
+              <div className="tabs" role="tablist">
+                {["all", "children", "parents", "murabbi"].map((k) => (
+                  <button key={k} type="button" role="tab" aria-selected={pillar === k} className={pillar === k ? "tab active" : "tab"}
+                    onClick={() => { setPillar(k); setShowAll(false); }}>
+                    {k === "all" ? t("all") : t(pillarLabelKey(k))}
+                    <span className="tab-count">{fmtNum(k === "all" ? disc.items.length : pillarCounts[k] || 0)}</span>
+                  </button>
+                ))}
+              </div>
+              {filtered.length === 0 ? <p className="empty">{t("none")}</p> : (
+                <div className="res-list">
+                  {visible.map((r) => <ResourceItem key={r.id} r={r} />)}
+                </div>
+              )}
+              {filtered.length > visible.length || showAll ? (
+                <div className="list-foot">
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setShowAll((x) => !x)}>
+                    {showAll ? t("show_less") : `${t("show_all")} (${fmtNum(filtered.length)})`}
+                  </button>
+                  <Link to={pillar === "all" ? "/library" : `/library?pillar=${pillar}`} className="small">{t("open_library")} →</Link>
+                </div>
+              ) : null}
+            </>
+          )}
+        </section>
 
-      <div className="grid-2">
-        <Card title={t("research_progress")}>
-          <div className="stats-grid">
+        <aside className="dash-aside">
+          <section className="card">
+            <header className="card-head"><h2>{t("pillar_breakdown")}</h2></header>
+            <div className="bars">
+              {Object.entries(st.pillars).map(([k, n]) => {
+                const max = Math.max(1, ...Object.values(st.pillars));
+                const body = (
+                  <>
+                    <span className="bar-label">{t(pillarLabelKey(k))}</span>
+                    <span className="bar-track"><span className={`bar-fill fill-${k}`} style={{ inlineSize: `${(n / max) * 100}%` }} /></span>
+                    <span className="bar-num">{fmtNum(n)}</span>
+                  </>
+                );
+                return ["children", "parents", "murabbi"].includes(k)
+                  ? <Link key={k} className="bar-row" to={`/library?pillar=${k}`}>{body}</Link>
+                  : <div key={k} className="bar-row">{body}</div>;
+              })}
+            </div>
+          </section>
+
+          <section className="card">
+            <header className="card-head"><h2>{t("discoveries")}</h2></header>
+            <dl className="breakdown">
+              {breakdowns.filter(([, m]) => m && Object.keys(m).length).map(([label, m]) => (
+                <div key={label}><dt>{label}</dt><dd><CountList data={m} /></dd></div>
+              ))}
+              {disc.paid_catalogued ? <div><dt>{t("paid_catalogued")}</dt><dd>{fmtNum(disc.paid_catalogued)}</dd></div> : null}
+            </dl>
+            {disc.institutions.length ? <><h3>{t("new_institutions")}</h3><EntityChips list={disc.institutions} /></> : null}
+            {disc.experts.length ? <><h3>{t("new_experts")}</h3><EntityChips list={disc.experts} /></> : null}
+          </section>
+
+          {gaps.emerging_topics.length ? (
+            <section className="card">
+              <header className="card-head"><h2>{t("emerging_topics")}</h2></header>
+              <table className="compact">
+                <thead><tr><th>{t("topic")}</th><th className="num">{t("today_n")}</th><th className="num">{t("prev_avg")}</th></tr></thead>
+                <tbody>
+                  {gaps.emerging_topics.map((e) => (
+                    <tr key={e.topic}><td dir="auto">{lang === "ar" ? e.topic_ar : e.topic}</td><td className="num">{e.today}</td><td className="num muted">{e.prev_daily_avg}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+
+          {d.previous ? (
+            <section className="card card-muted">
+              <header className="card-head">
+                <h2>{t("yesterday")} <span className="muted count">{d.previous.day}</span></h2>
+                <Badge tone={d.previous.finalized ? "good" : "neutral"}>{d.previous.finalized ? t("finalized") : t("not_finalized")}</Badge>
+              </header>
+              <p className="small" dir="auto">{d.previous.summary || t("nothing_yet")}</p>
+              <Link to={`/day/${d.previous.day}`} className="small">{t("open_day")} →</Link>
+            </section>
+          ) : null}
+        </aside>
+      </div>
+
+      <div className="section-stack">
+        <details className="card fold" open={hasResearch}>
+          <summary><h2>{t("research_progress")}</h2><span className="fold-meta">{fmtNum(res.questions_investigated)} {t("q_investigated").toLowerCase()} · {fmtNum(res.claims_extracted)} {t("claims_extracted").toLowerCase()}</span></summary>
+          <div className="stats-row">
             <Stat label={t("q_created")} value={fmtNum(res.questions_created)} />
             <Stat label={t("q_investigated")} value={fmtNum(res.questions_investigated)} />
             <Stat label={t("q_answered")} value={fmtNum(res.questions_answered)} />
@@ -249,131 +332,116 @@ function DashboardBody({ d, reload }: { d: DashboardData; reload: () => void }) 
               ))}
             </ul>
           ) : null}
-        </Card>
-
-        <Card title={t("collection_activity")}>
-          <div className="stats-grid">
-            <Stat label={t("sources_visited")} value={fmtNum(act.sources_visited)} />
-            <Stat label={t("downloaded")} value={fmtNum(act.downloaded)} />
-            <Stat label={t("processed")} value={fmtNum(act.processed)} />
-            <Stat label={t("pending_jobs")} value={fmtNum(act.pending_jobs)} />
-            <Stat label={t("http_requests")} value={fmtNum(act.http_requests)} />
-            <Stat label={t("ai_calls")} value={fmtNum(act.ai_calls)} sub={`$${fmtNum(act.ai_cost_usd, 2)}`} />
-          </div>
-          <h3>{t("searches_per_source")}</h3>
-          {act.searches.length === 0 ? <p className="muted">{t("none")}</p> : (
-            <TableWrap>
-              <table>
-                <thead><tr><th>{t("source")}</th><th>{t("searches")}</th><th>{t("new_count")}</th></tr></thead>
-                <tbody>
-                  {act.searches.map((s) => <tr key={s.source}><td>{s.source}</td><td>{s.searches}</td><td>{s.new}</td></tr>)}
-                </tbody>
-              </table>
-            </TableWrap>
-          )}
-          <h3>{t("jobs_by_type")}</h3>
-          {Object.keys(act.jobs).length === 0 ? <p className="muted">{t("none")}</p> : (
-            <TableWrap>
-              <table>
-                <thead><tr><th>{t("type")}</th><th>{t("status")}</th></tr></thead>
-                <tbody>
-                  {Object.entries(act.jobs).map(([jt, m]) => (
-                    <tr key={jt}><td>{jt}</td><td><CountList data={m} /></td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-          )}
-          <h3>{t("failed_jobs")} ({act.failed_jobs.length})</h3>
-          {act.failed_jobs.length === 0 ? <p className="muted">{t("none")}</p> : (
-            <ul className="plain-list">
-              {act.failed_jobs.map((j) => (
-                <li key={j.id}>
-                  <strong>#{j.id}</strong> {j.type} <span className="err-text" dir="auto">{j.error}</span>{" "}
-                  <ActionButton className="btn btn-small" onRun={async () => { const r = await api.post(`/api/jobs/${j.id}/retry`); reload(); return r; }}>
-                    {t("retry")}
-                  </ActionButton>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
-
-      <div className="grid-2">
-        <Card title={t("knowledge_gaps")}>
-          <h3>{t("emerging_topics")}</h3>
-          {gaps.emerging_topics.length === 0 ? <p className="muted">{t("none")}</p> : (
-            <ul className="plain-list">
-              {gaps.emerging_topics.map((e) => (
-                <li key={e.topic}>
-                  <span dir="auto">{lang === "ar" ? e.topic_ar : e.topic}</span> — {t("today_n")}: <strong>{e.today}</strong>, {t("prev_avg")}: {e.prev_daily_avg}
-                </li>
-              ))}
-            </ul>
-          )}
-          <h3>{t("new_questions")}</h3>
-          {gaps.new_questions.length === 0 ? <p className="muted">{t("none")}</p> : (
-            <ul className="plain-list">
-              {gaps.new_questions.map((q) => (
-                <li key={q.id}>
-                  <Link to={`/questions/${q.id}`} dir="auto">{q.text}</Link>
-                  {q.text_alt ? <div className="muted small" dir="auto">{q.text_alt}</div> : null}
-                  <div className="small"><Badge value={q.kind} tone="neutral" /> {t("priority")}: {fmtNum(q.priority, 2)}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <h3>{t("gap_findings")}</h3>
-          {gaps.gap_findings.length === 0 ? <p className="muted">{t("none")}</p> : (
-            <ul className="plain-list">
-              {gaps.gap_findings.map((f) => (
-                <li key={f.id} dir="auto">
-                  {f.question_id ? <Link to={`/questions/${f.question_id}`}>{f.statement}</Link> : f.statement}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card title={t("next_day_plan")}>
-          {!d.plan || Object.keys(d.plan).length === 0 ? <p className="muted">{t("no_plan")}</p> : (
+          {gaps.new_questions.length ? (
             <>
-              <h3>{t("prioritized_questions")}</h3>
-              {(plan.prioritized_questions || []).length === 0 ? <p className="muted">{t("none")}</p> : (
-                <ol className="plain-list numbered">
-                  {plan.prioritized_questions!.map((q) => (
-                    <li key={q.id}>
-                      <Link to={`/questions/${q.id}`} dir="auto">{q.text}</Link> <PillarBadges pillars={q.pillars} />{" "}
-                      <span className="muted small">{fmtNum(q.priority, 2)}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <h3>{t("sources_to_revisit")}</h3>
-              {(plan.sources_to_revisit || []).length === 0 ? <p className="muted">{t("none")}</p> : (
-                <ul className="plain-list">
-                  {plan.sources_to_revisit!.map((s) => (
-                    <li key={s.id}><Link to="/sources" dir="auto">{s.name}</Link> <span className="muted small">{fmtDate(s.next_run_at)}</span></li>
-                  ))}
-                </ul>
-              )}
-              <h3>{t("pending_documents")}</h3>
-              {(plan.pending_documents || []).length === 0 ? <p className="muted">{t("none")}</p> : (
-                <ul className="plain-list">
-                  {plan.pending_documents!.map((r) => (
-                    <li key={r.id}><Link to={`/resources/${r.id}`} dir="auto">{r.title}</Link> <Badge value={r.acquisition} /> <Badge value={r.processing} /></li>
-                  ))}
-                </ul>
-              )}
-              <h3>{t("queued_jobs")}</h3>
-              <CountList data={plan.queued_jobs} />
-              {plan.deferred_questions !== undefined ? (
-                <p className="small">{t("deferred_questions")}: <strong>{plan.deferred_questions}</strong></p>
-              ) : null}
+              <h3>{t("new_questions")}</h3>
+              <ul className="plain-list">
+                {gaps.new_questions.map((q) => (
+                  <li key={q.id}>
+                    <Link to={`/questions/${q.id}`} dir="auto">{q.text}</Link>
+                    {q.text_alt ? <div className="muted small" dir="auto">{q.text_alt}</div> : null}
+                    <div className="small muted"><Badge value={q.kind} tone="neutral" /> {t("priority")}: {fmtNum(q.priority, 2)}</div>
+                  </li>
+                ))}
+              </ul>
             </>
+          ) : null}
+          {gaps.gap_findings.length ? (
+            <>
+              <h3>{t("gap_findings")}</h3>
+              <ul className="plain-list">
+                {gaps.gap_findings.map((f) => (
+                  <li key={f.id} dir="auto">{f.question_id ? <Link to={`/questions/${f.question_id}`}>{f.statement}</Link> : f.statement}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </details>
+
+        <details className="card fold" open={act.failed_jobs.length > 0}>
+          <summary><h2>{t("collection_activity")}</h2><span className="fold-meta">{fmtNum(act.sources_visited)} {t("sources_visited").toLowerCase()} · {fmtNum(act.http_requests)} {t("http_requests").toLowerCase()} · {fmtNum(act.ai_calls)} {t("ai_calls").toLowerCase()} (${fmtNum(act.ai_cost_usd, 2)})</span></summary>
+          {act.failed_jobs.length ? (
+            <>
+              <h3>{t("failed_jobs")} ({act.failed_jobs.length})</h3>
+              <ul className="plain-list">
+                {act.failed_jobs.map((j) => (
+                  <li key={j.id}>
+                    <strong>#{j.id}</strong> {j.type} <span className="err-text" dir="auto">{j.error}</span>{" "}
+                    <ActionButton className="btn btn-small" onRun={async () => { const r = await api.post(`/api/jobs/${j.id}/retry`); reload(); return r; }}>
+                      {t("retry")}
+                    </ActionButton>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          <div className="grid-2 flat">
+            <div>
+              <h3>{t("searches_per_source")}</h3>
+              {act.searches.length === 0 ? <p className="muted small">{t("none")}</p> : (
+                <TableWrap>
+                  <table>
+                    <thead><tr><th>{t("source")}</th><th className="num">{t("searches")}</th><th className="num">{t("new_count")}</th></tr></thead>
+                    <tbody>{act.searches.map((s) => <tr key={s.source}><td>{s.source}</td><td className="num">{s.searches}</td><td className="num">{s.new}</td></tr>)}</tbody>
+                  </table>
+                </TableWrap>
+              )}
+            </div>
+            <div>
+              <h3>{t("jobs_by_type")}</h3>
+              {Object.keys(act.jobs).length === 0 ? <p className="muted small">{t("none")}</p> : (
+                <TableWrap>
+                  <table>
+                    <thead><tr><th>{t("type")}</th><th>{t("status")}</th></tr></thead>
+                    <tbody>{Object.entries(act.jobs).map(([jt, m]) => <tr key={jt}><td>{jt}</td><td><CountList data={m} /></td></tr>)}</tbody>
+                  </table>
+                </TableWrap>
+              )}
+            </div>
+          </div>
+        </details>
+
+        <details className="card fold">
+          <summary><h2>{t("next_day_plan")}</h2>{planEmpty ? <span className="fold-meta">{t("no_plan")}</span> : null}</summary>
+          {planEmpty ? <p className="muted small">{t("no_plan")}</p> : (
+            <div className="grid-2 flat">
+              <div>
+                <h3>{t("prioritized_questions")}</h3>
+                {(plan.prioritized_questions || []).length === 0 ? <p className="muted small">{t("none")}</p> : (
+                  <ol className="plain-list numbered">
+                    {plan.prioritized_questions!.map((q) => (
+                      <li key={q.id}>
+                        <Link to={`/questions/${q.id}`} dir="auto">{q.text}</Link> <PillarBadges pillars={q.pillars} />{" "}
+                        <span className="muted small">{fmtNum(q.priority, 2)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                <h3>{t("queued_jobs")}</h3>
+                <CountList data={plan.queued_jobs} />
+                {plan.deferred_questions !== undefined ? <p className="small muted">{t("deferred_questions")}: <strong>{plan.deferred_questions}</strong></p> : null}
+              </div>
+              <div>
+                <h3>{t("sources_to_revisit")}</h3>
+                {(plan.sources_to_revisit || []).length === 0 ? <p className="muted small">{t("none")}</p> : (
+                  <ul className="plain-list">
+                    {plan.sources_to_revisit!.map((s) => (
+                      <li key={s.id}><Link to="/sources" dir="auto">{s.name}</Link> <span className="muted small">{fmtDate(s.next_run_at)}</span></li>
+                    ))}
+                  </ul>
+                )}
+                <h3>{t("pending_documents")}</h3>
+                {(plan.pending_documents || []).length === 0 ? <p className="muted small">{t("none")}</p> : (
+                  <ul className="plain-list">
+                    {plan.pending_documents!.map((r) => (
+                      <li key={r.id}><Link to={`/resources/${r.id}`} dir="auto">{r.title}</Link> <Badge value={r.acquisition} /> <Badge value={r.processing} /></li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
           )}
-        </Card>
+        </details>
       </div>
     </>
   );

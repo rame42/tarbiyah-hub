@@ -63,7 +63,7 @@ export function ErrorBox({ error }: { error: string | null | undefined }) {
 
 export function Loading() {
   const { t } = useI18n();
-  return <div className="muted loading">{t("loading")}</div>;
+  return <div className="muted loading" role="status" aria-live="polite">{t("loading")}</div>;
 }
 
 /** Standard wrapper: shows loading/error, renders children when data is ready. */
@@ -362,23 +362,36 @@ export function RelevanceBadge({ value }: { value?: number | null }) {
   return <span className={`badge badge-${tone}`} title={t("relevance_help")}>{t("relevance_short")} {value}</span>;
 }
 
+/** "a · b · c" with empty parts skipped. */
+export function MetaLine({ parts }: { parts: ReactNode[] }) {
+  const shown = parts.filter((x) => x !== null && x !== undefined && x !== "" && x !== false);
+  return (
+    <>
+      {shown.map((x, i) => (
+        <span key={i}>
+          {i ? <span className="meta-sep" aria-hidden="true">· </span> : null}
+          {x}
+        </span>
+      ))}
+    </>
+  );
+}
+
 export function ResourceItem({ r }: { r: ResourceBrief }) {
-  const { t } = useI18n();
+  const { t, v } = useI18n();
   return (
     <div className="res-item">
       <div className="res-title">
         <ResourceLink r={r} />
       </div>
       <div className="res-meta">
-        {r.authors ? <span dir="auto">{r.authors}</span> : null}
-        <Badge value={r.type} tone="neutral" />
-        {r.language ? <span className="badge badge-neutral">{r.language}</span> : null}
-        {r.year ? <span>{r.year}</span> : null}
-        <Badge value={r.access_status} />
+        <MetaLine parts={[r.authors ? <span dir="auto">{r.authors}</span> : null, v(r.type),
+          r.language ? r.language.toUpperCase() : null, r.year ? String(r.year) : null]} />
+        {r.access_status && !["user_provided", "unknown"].includes(r.access_status) ? <Badge value={r.access_status} /> : null}
         {r.has_file ? <span className="badge badge-info">{t("has_file")}</span> : null}
         <PillarBadges pillars={r.pillars} />
         <RelevanceBadge value={r.relevance} />
-        {(r.labels || []).map((lb) => <span key={lb} className="badge badge-label" dir="auto">🏷 {lb}</span>)}
+        {(r.labels || []).map((lb) => <span key={lb} className="badge badge-label" dir="auto"># {lb}</span>)}
         <WatchButton url={r.url} type={r.type} small />
         {r.url && !videoPlatform(r.url) && r.type !== "video" && !r.has_file ? (
           <a className="small" href={r.url} target="_blank" rel="noopener noreferrer">{t("open_link")} ↗</a>
