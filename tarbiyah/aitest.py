@@ -54,8 +54,13 @@ def run(out=print) -> bool:
         problems.append("The key is empty. Put it right after TH_AI_API_KEY= on the same line.")
     elif key != key.strip() or key[0] in "\"'" or " " in key:
         problems.append("The key contains quotes or spaces. Remove them: TH_AI_API_KEY=yourkey")
-    if not model or (provider not in ("", "claude") and model.startswith("claude-")):
+    if not model:
         problems.append("TH_AI_MODEL is missing. Copy the exact model name from the service's model list.")
+    elif provider not in ("", "claude") and model.startswith("claude-"):
+        example = {"gemini": "gemini-2.5-flash", "openai": "gpt-4o-mini", "groq": "llama-3.3-70b-versatile"}.get(provider, "")
+        problems.append(f"'{model}' is a Claude model, but the AI service is '{provider}'. Either set the AI model to one "
+                        f"of {provider}'s models" + (f" (for example {example})" if example else "") +
+                        ", or set the AI service to 'claude' and use a Claude key (it starts with sk-ant-).")
     if not url:
         problems.append("The service address is empty (TH_AI_BASE_URL).")
     if problems:
