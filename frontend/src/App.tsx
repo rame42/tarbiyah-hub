@@ -181,6 +181,25 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+// ---------------------------------------------------------------- logo: a seedling growing from an open book, inside an arch
+
+export function Logo({ size = 30 }: { size?: number }) {
+  return (
+    <svg className="brand-mark" width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#1e5a48" />
+      <g fill="none" stroke="#f4ecda" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 54V30C15 20 23 13.5 32 9C41 13.5 49 20 49 30V54" />
+        <path d="M32 45V27" />
+      </g>
+      <g fill="#f4ecda">
+        <path d="M32 37C26.5 37 22.2 33.4 21.5 27.6C27 27.6 31.2 31.2 32 37Z" />
+        <path d="M32 31.5C32.6 25.8 36.7 22 42.5 21.8C42 27.6 37.8 31.3 32 31.5Z" />
+        <path d="M19.5 45.2C23.6 43.2 28.2 43.4 32 46C35.8 43.4 40.4 43.2 44.5 45.2V51C40.4 49 35.8 49.2 32 51.8C28.2 49.2 23.6 49 19.5 51Z" />
+      </g>
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------- shell
 
 function Shell() {
@@ -236,7 +255,7 @@ function Shell() {
       <div className={`shell ${menuOpen ? "menu-open" : ""}`}>
         <aside id="sidenav" className="sidenav" aria-label={t("menu")}>
           <div className="side-brand">
-            <span className="brand-mark" aria-hidden="true">ت</span>
+            <Logo />
             <span className="brand-text">
               <span className="brand-name">{t("app_name")}</span>
               <span className="brand-tag">{t("app_tagline")}</span>

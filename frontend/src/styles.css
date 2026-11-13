@@ -327,17 +327,9 @@ kbd {
   padding: 1rem 1rem 0.75rem;
 }
 .brand-mark {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 1.85rem;
-  block-size: 1.85rem;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--font-ar);
-  font-weight: 600;
-  font-size: 1.1rem;
-  line-height: 1;
+  display: block;
+  inline-size: 1.9rem;
+  block-size: 1.9rem;
   flex: none;
 }
 .brand-text {
