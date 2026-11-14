@@ -108,7 +108,7 @@ class ClaudeProvider:
             return self._client
 
     def model_for(self, task: str) -> str:
-        return get_config().ai_model
+        return claude_model()
 
     # ------------------------------------------------------------------ budget
     def _check_budget(self) -> None:
@@ -218,6 +218,15 @@ class ClaudeProvider:
 
 
 _provider: ClaudeProvider | None = None
+
+
+CLAUDE_DEFAULT_MODEL = "claude-haiku-5-5"
+
+
+def claude_model() -> str:
+    """The model box may still hold another service's model (e.g. gemini-...): then use a Claude default."""
+    m = get_config().ai_model.strip().strip("\"'")
+    return m if m.lower().startswith("claude") else CLAUDE_DEFAULT_MODEL
 
 
 def claude() -> ClaudeProvider:

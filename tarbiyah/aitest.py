@@ -34,7 +34,11 @@ def run(out=print, _retry: bool = True) -> bool:
             out("PROBLEM: the provider is Claude but ANTHROPIC_API_KEY is empty.")
             out("FIX: for Gemini put TH_AI_PROVIDER=gemini in .env (check spelling, no spaces around =).")
             return False
-        key, model, url = cfg.anthropic_api_key, cfg.ai_model, "https://api.anthropic.com"
+        from .ai.claude import claude_model
+
+        key, model, url = cfg.anthropic_api_key, claude_model(), "https://api.anthropic.com"
+        if model != cfg.ai_model.strip():
+            out(f"(the model box says '{cfg.ai_model.strip() or 'nothing'}', which is not a Claude model, so '{model}' is used)")
     else:
         from .ai.openai_compat import KNOWN_SERVICES, base_url
 
@@ -52,7 +56,7 @@ def run(out=print, _retry: bool = True) -> bool:
                 out(f"(model name '{cfg.ai_model.strip()}' is used as '{model}')")
     out(f"Service address: {url or '(empty)'}")
     out(f"Model (TH_AI_MODEL): {model or '(empty)'}")
-    out(f"Key (TH_AI_API_KEY): {_mask(key) if key else '(empty)'}\n")
+    out(f"Key ({'ANTHROPIC_API_KEY' if provider in ('', 'claude') else 'TH_AI_API_KEY'}): {_mask(key) if key else '(empty)'}\n")
     problems = []
     if not key:
         problems.append("The key is empty. Put it right after TH_AI_API_KEY= on the same line.")
@@ -72,8 +76,7 @@ def run(out=print, _retry: bool = True) -> bool:
             out("PROBLEM: " + p)
         return False
     if provider in ("", "claude"):
-        out("Settings look complete for Claude. (This test sends requests only to other services.)")
-        return True
+        return _test_claude(out, key, model)
     out("Sending one short test message...")
     try:
         r = requests.post(url.rstrip("/") + "/chat/completions", timeout=60,
@@ -133,6 +136,60 @@ def run(out=print, _retry: bool = True) -> bool:
         hint = hints.get(r.status_code, "Read the message above; send it to your helper if unclear.")
     out("FIX: " + hint)
     return False
+
+
+def _test_claude(out, key: str, model: str) -> bool:
+    """Send Claude one tiny message and explain the answer in plain words."""
+    import anthropic
+
+    if not key.startswith("sk-ant-"):
+        out("NOTE: Claude API keys start with 'sk-ant-'. This key does not, so it is probably not a Claude key.\n")
+    elif len(key) < 80:
+        out(f"NOTE: this key is only {len(key)} characters long; a full Claude key is about 100 characters "
+            "(sk-ant-api03-...). Part of it is probably missing: copy it again in one piece.\n")
+    out("Sending one short test message to Claude...")
+    client = anthropic.Anthropic(api_key=key, max_retries=1, timeout=60.0)
+    try:
+        r = client.messages.create(model=model, max_tokens=20,
+                                   messages=[{"role": "user", "content": "Reply with the word OK."}])
+    except anthropic.AuthenticationError:
+        out("PROBLEM: Claude rejected the key.")
+        out("FIX: in console.anthropic.com > API keys, create a key, copy it whole and paste it in "
+            "Settings > Keys & AI > Claude API key. A Gemini/Google key does not work here.")
+        return False
+    except anthropic.PermissionDeniedError as e:
+        out(f"PROBLEM: this key is not allowed to use Claude: {e.message}")
+        return False
+    except anthropic.NotFoundError:
+        out(f"PROBLEM: Claude does not know the model '{model}'.")
+        try:
+            names = [m.id for m in client.models.list(limit=50).data]
+            out("Model names your key can use (put one in Settings > Keys & AI > AI model):")
+            for n in names[:20]:
+                out("   " + n)
+        except Exception:  # noqa: BLE001 - listing is a convenience
+            out("FIX: put a Claude model name such as claude-haiku-5-5 in the AI model box.")
+        return False
+    except anthropic.RateLimitError:
+        out("PROBLEM: Claude's limit for this key is reached right now. Wait a minute and test again.")
+        return False
+    except anthropic.BadRequestError as e:
+        msg = str(getattr(e, "message", e))
+        if "credit" in msg.lower() or "billing" in msg.lower():
+            out("PROBLEM: the Claude account behind this key has no API credit.")
+            out("FIX: a Claude.ai chat subscription (free or paid) does not include API use. Add credit in "
+                "console.anthropic.com > Billing, or use the free Gemini service instead (AI service: gemini).")
+        else:
+            out(f"PROBLEM: Claude refused the test request: {msg}")
+        return False
+    except anthropic.APIConnectionError as e:
+        out(f"PROBLEM: could not reach Claude: {e}")
+        out("FIX: check the internet connection, and allow Python through Windows Firewall/antivirus.")
+        return False
+    reply = "".join(getattr(b, "text", "") for b in r.content).strip()
+    out(f"SUCCESS: Claude answered: {reply!r}")
+    out("Done: Tarbiyah Hub uses Claude from now on (no restart needed). The dashboard AI badge shows it as configured.")
+    return True
 
 
 if __name__ == "__main__":
