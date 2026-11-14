@@ -57,3 +57,19 @@ def test_explore_and_choose_sections(env):
             assert c.put(f"/api/my-sources/{src['id']}/sections", json={"urls": []}).status_code == 400
     finally:
         srv.shutdown()
+
+
+def test_top_ten_arabic_sites_come_narrow(env):
+    from tarbiyah.api.app import app
+
+    with TestClient(app) as c:
+        top = [x for x in c.get("/api/catalog").json()["sites"] if x.get("top10")]
+        assert len(top) == 10 and all(x["lang"] == "ar" for x in top)
+        c.post("/api/catalog/add", json={"keys": ["islamweb-tarbiyah", "dorar-akhlaq"]})
+        mine = {x["name"]: x for x in c.get("/api/my-sources").json()["sources"]}
+        web = next(v for k, v in mine.items() if "إسلام ويب" in k)
+        assert "/ar/article/" in web["config"]["include_patterns"]
+        st = web["strict"]
+        assert st["review"] and st["keywords_in"] == "title" and "تربية الأبناء" in st["keywords"] and st["criteria"]
+        dorar = next(v for k, v in mine.items() if "الدرر" in k)
+        assert dorar["strict"]["keywords_in"] == "text"

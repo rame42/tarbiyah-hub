@@ -1265,9 +1265,21 @@ def catalog_list(s: Session = Depends(get_session)) -> dict[str, Any]:
 
     out = []
     for c in CATALOG:
-        ex = _existing_site(s, c["url"])
+        ex = _catalog_source(s, c)
         out.append({**c, "added": ex is not None, "source_id": ex.id if ex else None, "source_name": ex.name if ex else None})
     return {"sites": out}
+
+
+def _catalog_source(s: Session, c: dict[str, Any]) -> Source | None:
+    """The source made from this recommended entry (same entry, or the same start address)."""
+    from ..ingest.registry import canonical_url
+
+    want = canonical_url(c["url"])
+    for x in s.execute(select(Source).where(Source.adapter == "web_crawler", Source.health != "deleted")).scalars():
+        cfg = x.config or {}
+        if cfg.get("catalog") == c["key"] or want in {canonical_url(u) for u in cfg.get("start_urls") or []}:
+            return x
+    return None
 
 
 class CatalogAddIn(BaseModel):
@@ -1289,13 +1301,14 @@ def catalog_add(body: CatalogAddIn, s: Session = Depends(get_session)) -> dict[s
         c = by_key.get(k)
         if c is None:
             continue
-        if _existing_site(s, c["url"]):
+        if _catalog_source(s, c):
             skipped.append(f"{c['name']}: already in your sources")
             continue
         cfg = {**a.info.default_config, "role": "monitor", "added_by": "user", "start_urls": [c["url"]],
                "allowed_domains": [_site_domain(c["url"])], "section_lock": True, "use_sitemap": False,
                "max_pages": 100, "min_interval_seconds": 3, "language": c["lang"], "catalog": c["key"],
-               "strict": {**strict.DEFAULTS, "enabled": True, "pillars": c["pillars"]}}
+               **(c.get("config") or {}),
+               "strict": {**strict.DEFAULTS, **(c.get("strict") or {}), "enabled": True, "pillars": c["pillars"]}}
         base = re.sub(r"[^a-z0-9]+", "-", f"web-{c['key']}").strip("-")
         key, n = base, 1
         while s.execute(select(Source).where(Source.key == key)).first():

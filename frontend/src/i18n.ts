@@ -66,6 +66,8 @@ const D = {
   show_all: ["Show all", "عرض الكل"],
   needs_attention: ["Needs attention", "تحتاج إلى متابعة"],
   filter: ["Filter…", "تصفية…"],
+  catalog_add_top10: ["Add the ten Arabic tarbiyah sites", "أضف مواقع التربية العربية العشرة"],
+  catalog_precise: ["precise rules ready", "قواعد دقيقة جاهزة"],
   delete_source_q: ["Delete this source?", "حذف هذا المصدر؟"],
   delete_source_help: ["It stops running and leaves the lists. You can restore it later from Sources → Deleted sources.", "يتوقف عن العمل ويختفي من القوائم. يمكنك استعادته لاحقًا من المصادر ← المصادر المحذوفة."],
   delete_keep_items: ["Delete source, keep its items", "احذف المصدر واحتفظ بعناصره"],

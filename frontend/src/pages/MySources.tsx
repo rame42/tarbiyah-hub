@@ -304,7 +304,7 @@ function StrictPanel({ s, reload }: { s: MySource; reload: () => void }) {
 }
 
 interface CatalogSite { key: string; name: string; url: string; lang: string; section: boolean; pillars: string[];
-  about: string; added: boolean; source_name: string | null }
+  about: string; added: boolean; source_name: string | null; top10?: boolean }
 
 function Catalog({ reload }: { reload: () => void }) {
   const { t } = useI18n();
@@ -325,7 +325,12 @@ function Catalog({ reload }: { reload: () => void }) {
           {(d) => (
             <>
               <div className="toolbar spaced">
-                <ActionButton className="btn btn-primary btn-small" onRun={() => add(d.sites.filter((x) => !x.added).map((x) => x.key))}>
+                {d.sites.some((x) => x.top10 && !x.added) ? (
+                  <ActionButton className="btn btn-primary btn-small" onRun={() => add(d.sites.filter((x) => x.top10 && !x.added).map((x) => x.key))}>
+                    {t("catalog_add_top10")} ({d.sites.filter((x) => x.top10 && !x.added).length})
+                  </ActionButton>
+                ) : null}
+                <ActionButton className="btn btn-small" onRun={() => add(d.sites.filter((x) => !x.added).map((x) => x.key))}>
                   {t("catalog_add_all")} ({d.sites.filter((x) => !x.added).length})
                 </ActionButton>
                 {msg ? <span className="small" role="status">{msg}</span> : null}
@@ -335,7 +340,7 @@ function Catalog({ reload }: { reload: () => void }) {
                   <tbody>
                     {d.sites.map((x) => (
                       <tr key={x.key}>
-                        <td dir="auto"><strong>{x.name}</strong><br /><a className="small" href={x.url} target="_blank" rel="noopener noreferrer" dir="ltr">{decodeURI(x.url)} ↗</a>
+                        <td dir="auto"><strong>{x.name}</strong>{x.top10 ? <> <span className="badge badge-good">{t("catalog_precise")}</span></> : null}<br /><a className="small" href={x.url} target="_blank" rel="noopener noreferrer" dir="ltr">{decodeURI(x.url)} ↗</a>
                           <div className="small muted" dir="auto">{x.about}</div></td>
                         <td className="small">{x.pillars.map((p) => t(`pillar_${p}` as never)).join(", ")}<br />
                           <span className="muted">{x.section ? t("catalog_section") : t("catalog_home")}</span></td>
