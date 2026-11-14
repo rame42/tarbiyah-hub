@@ -318,7 +318,7 @@ function Catalog({ reload }: { reload: () => void }) {
   };
   return (
     <Card title={t("catalog_title")}>
-      <details>
+      <details open={!!state.data && state.data.sites.some((x) => x.top10 && !x.added)}>
         <summary className="small">{t("catalog_open")}</summary>
         <p className="small">{t("catalog_intro")}</p>
         <Async state={state}>
