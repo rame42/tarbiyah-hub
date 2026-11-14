@@ -149,3 +149,19 @@ def test_model_display_names_are_normalized(env, monkeypatch):
         monkeypatch.setenv("TH_AI_MODEL", raw)
         reset_config_cache()
         assert model_name() == want
+
+
+def test_claude_model_name_with_gemini_uses_gemini_default(env, monkeypatch):
+    from tarbiyah.config import reset_config_cache
+
+    monkeypatch.setenv("TH_AI_PROVIDER", "gemini")
+    monkeypatch.setenv("TH_AI_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("TH_AI_API_KEY", "AQ.test-key")
+    reset_config_cache()
+    from tarbiyah.ai.openai_compat import OpenAICompatProvider, model_name
+
+    assert model_name() == "gemini-2.5-flash"
+    assert OpenAICompatProvider().configured()
+    monkeypatch.setenv("TH_AI_MODEL", "gemini-2.5-pro")
+    reset_config_cache()
+    assert model_name() == "gemini-2.5-pro"  # a real Gemini name is kept

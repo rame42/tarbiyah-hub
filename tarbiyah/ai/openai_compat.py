@@ -35,9 +35,24 @@ KNOWN_SERVICES = {
 }
 
 
+# used when the model box is empty or still holds a Claude model name (it belongs to another service)
+DEFAULT_MODELS = {
+    "gemini": "gemini-2.5-flash",
+    "openai": "gpt-4o-mini",
+    "groq": "llama-3.3-70b-versatile",
+    "openrouter": "google/gemini-2.5-flash",
+    "deepseek": "deepseek-chat",
+    "mistral": "mistral-small-latest",
+}
+
+
 def model_name() -> str:
-    """Accept display names too: 'Gemini 2.5 Flash' -> 'gemini-2.5-flash'; strip quotes and 'models/'."""
+    """Accept display names too: 'Gemini 2.5 Flash' -> 'gemini-2.5-flash'; strip quotes and 'models/'.
+    An empty model, or a Claude model name with another service, falls back to that service's default."""
     m = get_config().ai_model.strip().strip("\"'").strip()
+    provider = get_config().ai_provider.strip().lower()
+    if (not m or m.lower().startswith("claude-")) and provider in DEFAULT_MODELS:
+        return DEFAULT_MODELS[provider]
     if m.lower().startswith("models/"):
         m = m[7:]
     if " " in m or (m != m.lower() and get_config().ai_provider.strip().lower() == "gemini"):
@@ -68,7 +83,8 @@ class OpenAICompatProvider(ClaudeProvider):
 
     def configured(self) -> bool:
         cfg = get_config()
-        return bool(cfg.ai_api_key and base_url() and cfg.ai_model and not cfg.ai_model.startswith("claude-"))
+        m = model_name()
+        return bool(cfg.ai_api_key and base_url() and m and not m.startswith("claude-"))
 
     def status(self) -> dict[str, Any]:
         st = super().status()

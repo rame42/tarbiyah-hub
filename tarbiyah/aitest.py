@@ -45,7 +45,11 @@ def run(out=print) -> bool:
 
         key, model, url = cfg.ai_api_key, model_name(), base_url()
         if model != cfg.ai_model.strip():
-            out(f"(model name '{cfg.ai_model.strip()}' is used as '{model}')")
+            if not cfg.ai_model.strip() or cfg.ai_model.strip().lower().startswith("claude-"):
+                out(f"(the model box says '{cfg.ai_model.strip() or 'nothing'}', which is not a {provider} model, "
+                    f"so {provider}'s default '{model}' is used)")
+            else:
+                out(f"(model name '{cfg.ai_model.strip()}' is used as '{model}')")
     out(f"Service address: {url or '(empty)'}")
     out(f"Model (TH_AI_MODEL): {model or '(empty)'}")
     out(f"Key (TH_AI_API_KEY): {_mask(key) if key else '(empty)'}\n")
