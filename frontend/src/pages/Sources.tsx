@@ -1,6 +1,6 @@
 import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, KV, Pre, TableWrap, useAsync } from "../components";
+import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, KV, Pre, TableWrap, useAsync, DeleteSourceButton } from "../components";
 import { useI18n } from "../i18n";
 
 interface AdapterInfo {
@@ -87,6 +87,7 @@ export default function Sources() {
           );
         }}
       </Async>
+      <DeletedSources key={state.data ? state.data.length : 0} onRestored={state.reload} />
       <AddSource onAdded={state.reload} />
     </div>
   );
@@ -252,11 +253,7 @@ function SourceCard({ s, onUpdate, onDeleted, bare }: { s: SourceRow; onUpdate: 
           <ActionButton className="btn btn-small btn-primary" onRun={() => api.post(`/api/sources/${s.id}/run`)}>{t("run_now")}</ActionButton>
         ) : null}
         <button type="button" className="btn btn-small" onClick={() => setEditing((x) => !x)} aria-expanded={editing}>{editing ? t("close") : t("edit")}</button>
-        {isMonitor ? (
-          <ActionButton className="btn btn-small btn-danger" confirm={`${t("confirm_delete")} ${t("delete_note")}`} onRun={async () => { const r = await api.del(`/api/sources/${s.id}`); onDeleted(); return r; }} title={t("delete_note")}>
-            {t("delete")}
-          </ActionButton>
-        ) : null}
+        <DeleteSourceButton id={s.id} name={s.name} items={s.items_collected} onDone={onDeleted} />
       </div>
       {editing ? <SourceEditor s={s} onSaved={(x) => { onUpdate(x); setEditing(false); }} /> : null}
       {!editing && Object.keys(s.config).length ? (
@@ -397,5 +394,25 @@ function AddSource({ onAdded }: { onAdded: () => void }) {
         <div><button type="submit" className="btn btn-primary" disabled={!adapter || !name.trim()}>{t("add")}</button></div>
       </form>
     </Card>
+  );
+}
+
+function DeletedSources({ onRestored }: { onRestored: () => void }) {
+  const { t } = useI18n();
+  const list = useAsync(() => api.get<{ id: number; name: string; adapter: string; deleted_at: string | null }[]>("/api/sources/deleted"), []);
+  if (!list.data || list.data.length === 0) return null;
+  return (
+    <details className="card fold">
+      <summary><h2>{t("deleted_sources")}</h2><span className="fold-meta">{list.data.length}</span></summary>
+      <p className="small muted">{t("deleted_sources_help")}</p>
+      <ul className="plain-list">
+        {list.data.map((x) => (
+          <li key={x.id} className="row-between">
+            <span><span dir="auto">{x.name}</span> <span className="muted small">· {x.adapter} · {fmtDate(x.deleted_at)}</span></span>
+            <ActionButton className="btn btn-small" onRun={async () => { const r = await api.post(`/api/sources/${x.id}/restore`); list.reload(); onRestored(); return r; }}>{t("restore")}</ActionButton>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }

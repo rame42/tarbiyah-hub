@@ -104,7 +104,7 @@ def refresh_credential_health() -> None:
     with session_scope() as s:
         for src in s.execute(select(Source)).scalars():
             a = ADAPTERS.get(src.adapter)
-            if a is None:
+            if a is None or src.health == "deleted":
                 continue
             if a.missing_credentials():
                 src.health = "needs_credentials"

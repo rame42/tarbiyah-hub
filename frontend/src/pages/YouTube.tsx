@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { ActionButton, Async, Card, fmtDate, fmtNum, useAsync } from "../components";
+import { ActionButton, Async, Card, fmtDate, fmtNum, useAsync, DeleteSourceButton } from "../components";
 import { useI18n } from "../i18n";
 
 interface Suggestion { id: string; title: string; description: string; thumbnail: string | null; subscribers: number;
@@ -36,7 +36,7 @@ export default function YouTube() {
             </Card>
             <Card title={`${t("yt_my_channels")} (${d.channels.length})`}>
               <p className="small muted">{t("yt_my_channels_help")}</p>
-              {d.channels.map((c) => <ChannelRow key={c.id} c={c} defMin={d.default_min_minutes} />)}
+              {d.channels.map((c) => <ChannelRow key={c.id} c={c} defMin={d.default_min_minutes} onChanged={state.reload} />)}
             </Card>
           </>
         )}
@@ -101,7 +101,7 @@ function SuggestionRow({ x, reload }: { x: Suggestion; reload: () => void }) {
 
 interface Playlist { id: string; title: string; count: number; url: string }
 
-function ChannelRow({ c, defMin }: { c: MyChannel; defMin: number }) {
+function ChannelRow({ c, defMin, onChanged }: { c: MyChannel; defMin: number; onChanged: () => void }) {
   const { t } = useI18n();
   const [lists, setLists] = useState<Playlist[] | null>(null);
   const [chosen, setChosen] = useState<string[]>(c.only_playlists ? c.playlist_ids : []);
@@ -129,6 +129,7 @@ function ChannelRow({ c, defMin }: { c: MyChannel; defMin: number }) {
           <label className="field inline-field"><span>{t("yt_min_minutes")}</span>
             <input type="number" min={0} max={300} value={mins} onChange={(e) => setMins(e.target.value)} /></label>
           <Link className="btn btn-ghost btn-small" to="/my-sources">{t("yt_rules_link")}</Link>
+          <DeleteSourceButton id={c.id} name={c.name} items={c.items} onDone={onChanged} />
         </div>
         {lists ? (
           <div className="sections-list">

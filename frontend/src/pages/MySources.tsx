@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ResourceBrief } from "../api";
-import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, ResourceItem, useAsync } from "../components";
+import { ActionButton, Async, Badge, Card, ErrorBox, fmtDate, fmtNum, ResourceItem, useAsync, DeleteSourceButton } from "../components";
 import { useI18n } from "../i18n";
 
 interface MySource {
@@ -88,6 +88,7 @@ function SourceCard({ s, reload }: { s: MySource; reload: () => void }) {
           </label>
         ) : !s.mine ? <span className="small muted">{t("auto_source_filtered")}</span> : null}
         <Link className="btn btn-ghost btn-small" to="/sources">{t("edit_settings")}</Link>
+        <DeleteSourceButton id={s.id} name={s.name} items={s.items} onDone={reload} />
       </div>
       {Array.isArray(s.config.keywords) && (s.config.keywords as unknown[]).length ? <ApplyKeywords id={s.id} reload={reload} /> : null}
       {s.recent.length ? (

@@ -1,5 +1,6 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { api } from "./api";
 import type { PillarScore, ResourceBrief } from "./api";
 import { useI18n } from "./i18n";
 
@@ -411,4 +412,42 @@ export function Pre({ children }: { children: ReactNode }) {
 
 export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="table-wrap">{children}</div>;
+}
+
+/** Delete a source, choosing whether its collected items go too. Asks inline, never in a browser pop-up. */
+export function DeleteSourceButton({ id, name, items, onDone }: { id: number; name: string; items?: number | null; onDone: () => void }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const go = async (withItems: boolean) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.del(`/api/sources/${id}?items=${withItems ? "true" : "false"}`);
+      setOpen(false);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!open) {
+    return <button type="button" className="btn btn-small btn-danger" onClick={() => setOpen(true)}>{t("delete")}</button>;
+  }
+  return (
+    <div className="confirm-box" role="group" aria-label={t("delete_source_q")}>
+      <p className="small"><strong>{t("delete_source_q")}</strong> <span dir="auto">“{name}”</span></p>
+      <p className="small muted">{t("delete_source_help")}</p>
+      <div className="toolbar">
+        <button type="button" className="btn btn-small" disabled={busy} onClick={() => go(false)}>{t("delete_keep_items")}</button>
+        <button type="button" className="btn btn-small btn-danger" disabled={busy} onClick={() => go(true)}>
+          {t("delete_with_items")}{items ? ` (${fmtNum(items)})` : ""}
+        </button>
+        <button type="button" className="btn btn-small btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{t("cancel")}</button>
+      </div>
+      <ErrorBox error={err} />
+    </div>
+  );
 }

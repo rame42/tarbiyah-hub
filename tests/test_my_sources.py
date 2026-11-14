@@ -190,3 +190,38 @@ def test_add_many_websites_at_once(env):
         assert srcs["islamonline.net"]["config"]["start_urls"] == ["https://islamonline.net"]
         assert "include_patterns" not in srcs["islamonline.net"]["config"]  # no section path to stay in
         assert all(x["mine"] and x["enabled"] for x in srcs.values())
+
+
+def test_delete_any_source_with_or_without_items_and_restore(env):
+    from fastapi.testclient import TestClient
+
+    from tarbiyah.api.app import app
+    from tarbiyah.db import session_scope
+    from tarbiyah.models import Resource, Source
+    from tarbiyah.sources.registry import refresh_credential_health, seed_sources
+
+    seed_sources()
+    with session_scope() as s:
+        mine = Source(key="site-x", adapter="web_crawler", name="Site X", enabled=True, health="ok",
+                      config={"role": "monitor", "start_urls": ["https://x.test/"], "added_by": "user"})
+        s.add(mine)
+        s.flush()
+        s.add_all([Resource(title=f"item {i}", source_id=mine.id, source_key=mine.key) for i in range(3)])
+        mine_id = mine.id
+        builtin = s.query(Source).filter(Source.key == "openalex").one()
+        builtin_id = builtin.id
+    with TestClient(app) as c:
+        r = c.delete(f"/api/sources/{mine_id}?items=true").json()
+        assert r["items_deleted"] == 3
+        assert all(x["id"] != mine_id for x in c.get("/api/my-sources").json()["sources"])
+        assert c.delete(f"/api/sources/{builtin_id}").json()["items_deleted"] == 0  # built-in search sources too
+        seed_sources()  # a deleted built-in is not created again
+        refresh_credential_health()  # and stays deleted
+        deleted = {x["id"] for x in c.get("/api/sources/deleted").json()}
+        assert {mine_id, builtin_id} <= deleted
+        assert c.post(f"/api/sources/{mine_id}/restore").json()["ok"]
+    with session_scope() as s:
+        assert s.query(Source).filter(Source.key == "openalex").count() == 1
+        back = s.get(Source, mine_id)
+        assert back.key == "site-x" and back.health == "ready" and not back.enabled
+        assert s.query(Resource).filter(Resource.source_id == mine_id, Resource.deleted.is_(False)).count() == 0

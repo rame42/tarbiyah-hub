@@ -1127,7 +1127,7 @@ def my_sources(s: Session = Depends(get_session)) -> dict[str, Any]:
     out = []
     for src in s.execute(select(Source).order_by(Source.created_at)).scalars():
         cfg = src.config or {}
-        if cfg.get("role") != "monitor" or src.key == "inbox":
+        if cfg.get("role") != "monitor" or src.key == "inbox" or src.health == "deleted":
             continue
         counts = dict(s.execute(select(Resource.archived, func.count()).where(
             Resource.source_id == src.id, Resource.deleted.is_(False), Resource.duplicate_of_id.is_(None))
@@ -1443,7 +1443,7 @@ def youtube_overview(s: Session = Depends(get_session)) -> dict[str, Any]:
     st = yc._state(s)
     running = s.execute(select(Job).where(Job.job_type == "youtube_discover", Job.status.in_(queue.ACTIVE))).first()
     mine = []
-    for src in s.execute(select(Source).where(Source.adapter == "youtube")).scalars():
+    for src in s.execute(select(Source).where(Source.adapter == "youtube", Source.health != "deleted")).scalars():
         if not is_my_source(src):
             continue
         cfg = src.config or {}
@@ -1791,16 +1791,49 @@ def update_source(sid: int, body: dict[str, Any], s: Session = Depends(get_sessi
 
 
 @app.delete("/api/sources/{sid}")
-def delete_source(sid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+def delete_source(sid: int, items: bool = False, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """Delete a source (it stops and disappears from the lists). With items=true its collected items are deleted
+    too (removed from the library and never collected again). Can be undone with /restore (the items stay deleted)."""
+    from ..ingest.manage import delete_resource
+
     src = s.get(Source, sid)
     if src is None:
         raise _404("source")
-    if (src.config or {}).get("role") == "search":
-        raise HTTPException(400, "Built-in search sources can be disabled but not deleted.")
+    removed = 0
+    if items:
+        for r in s.execute(select(Resource).where(Resource.source_id == sid, Resource.deleted.is_(False))).scalars():
+            delete_resource(s, r)
+            removed += 1
+    for j in s.execute(select(Job).where(Job.status == "queued", Job.group == src.key)).scalars():
+        j.status = "cancelled"
+    builtin = (src.config or {}).get("role") == "search" or src.key == "inbox"
     src.enabled = False
     src.health = "deleted"
-    src.key = f"{src.key}--deleted-{src.id}"
-    return {"ok": True, "note": "Source disabled and archived; collected resources are kept."}
+    src.state = {**(src.state or {}), "deleted_from": {"key": src.key, "at": utcnow().isoformat()}}
+    if not builtin:  # free the name so the same site can be added again; built-ins keep theirs (never re-created)
+        src.key = f"{src.key}--deleted-{src.id}"
+    note = (f"Source deleted, and {removed} of its items removed from the library." if items
+            else "Source deleted; the items it collected stay in the library.")
+    return {"ok": True, "items_deleted": removed, "note": note}
+
+
+@app.post("/api/sources/{sid}/restore")
+def restore_source(sid: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    src = s.get(Source, sid)
+    if src is None or src.health != "deleted":
+        raise _404("deleted source")
+    old = ((src.state or {}).get("deleted_from") or {}).get("key")
+    if old and old != src.key and not s.execute(select(Source).where(Source.key == old)).first():
+        src.key = old
+    src.health = "ready"
+    return {"ok": True, "note": "Restored (switched off). Enable it when you want it to run again."}
+
+
+@app.get("/api/sources/deleted")
+def deleted_sources(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return [{"id": x.id, "name": x.name, "adapter": x.adapter, "role": (x.config or {}).get("role"),
+             "deleted_at": ((x.state or {}).get("deleted_from") or {}).get("at")}
+            for x in s.execute(select(Source).where(Source.health == "deleted").order_by(Source.name)).scalars()]
 
 
 @app.post("/api/sources/{sid}/run")

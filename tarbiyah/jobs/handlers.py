@@ -65,8 +65,8 @@ def claude_ocr(path: Path, pages: list[int]) -> dict[int, str]:
 def collect_source(ctx: JobContext) -> dict[str, Any]:
     s = ctx.session
     src = s.get(Source, ctx.payload["source_id"])
-    if src is None:
-        raise PermanentFailure("source no longer exists")
+    if src is None or src.health == "deleted":
+        return {"skipped": "source deleted"}
     adapter = ADAPTERS.get(src.adapter)
     if adapter is None:
         raise PermanentFailure(f"unknown adapter {src.adapter}")
@@ -164,8 +164,8 @@ def search_source(ctx: JobContext) -> dict[str, Any]:
     s = ctx.session
     p = ctx.payload
     src = s.get(Source, p["source_id"])
-    if src is None:
-        raise PermanentFailure("source no longer exists")
+    if src is None or src.health == "deleted":
+        return {"skipped": "source deleted"}
     adapter = ADAPTERS[src.adapter]
     log_row = SearchLog(adapter=src.adapter, query=p["query"], query_key=query_key(src.adapter, p["query"]),
                         lang=p.get("lang"), question_id=p.get("question_id"), topic_id=p.get("topic_id"))

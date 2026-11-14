@@ -2418,3 +2418,27 @@ tbody tr.detail-row:hover td {
   min-block-size: 1.9rem;
   font-size: 0.82rem;
 }
+
+.confirm-box {
+  flex-basis: 100%;
+  margin-block-start: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-inline-start-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  animation: fade-in 140ms var(--ease);
+}
+.confirm-box p {
+  margin: 0 0 0.35rem;
+}
+.confirm-box .toolbar {
+  margin-block-start: 0.5rem;
+}
+.row-between {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
