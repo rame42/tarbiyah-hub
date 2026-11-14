@@ -14,7 +14,7 @@ def _mask(key: str) -> str:
     return f"{key[:4]}…{key[-4:]} ({len(key)} characters)" if len(key) > 10 else "(too short)"
 
 
-def run(out=print) -> bool:
+def run(out=print, _retry: bool = True) -> bool:
     cfg = get_config()
     env = PROJECT_ROOT / ".env"
     out("Tarbiyah Hub - AI connection test\n")
@@ -90,9 +90,18 @@ def run(out=print) -> bool:
         except (KeyError, IndexError, ValueError):
             reply = r.text[:200]
         out(f"SUCCESS: the AI answered: {reply!r}")
-        out("Now restart Tarbiyah Hub (stop.bat, then start.bat). The dashboard AI badge should show it as configured.")
+        out("Done: Tarbiyah Hub uses this AI from now on (no restart needed). The dashboard AI badge shows it as configured.")
         return True
     body = r.text[:600]
+    if r.status_code == 404 and _retry:
+        from .ai.openai_compat import recommended_model, switch_model
+
+        new = recommended_model(r.text, model)
+        if new:
+            out(f"The service has retired '{model}' and recommends '{new}'.")
+            out(f"Switching the AI model to '{new}' (saved in Settings) and trying again...\n")
+            switch_model(new)
+            return run(out, _retry=False)
     out(f"PROBLEM: the service answered with error {r.status_code}:\n{body}\n")
     hints = {
         400: "Usually a wrong model name. Copy the exact name from the model list (e.g. AI Studio > model selector).",
@@ -105,7 +114,8 @@ def run(out=print) -> bool:
     if "key" in low and ("invalid" in low or "not valid" in low or "expired" in low):
         hint = ("The key was not accepted. Click 'Copy key' in AI Studio again and paste it right after "
                 "TH_AI_API_KEY= with no spaces or quotes. If it still fails, create a new key.")
-    elif "model" in low and ("not found" in low or "not supported" in low or "invalid" in low or "format" in low):
+    elif "model" in low and ("not found" in low or "not_found" in low or "no longer available" in low
+                             or "not supported" in low or "invalid" in low or "format" in low):
         hint = "The model name is wrong. Put one of the names listed below after TH_AI_MODEL= in .env."
         try:
             from .ai.openai_compat import list_models

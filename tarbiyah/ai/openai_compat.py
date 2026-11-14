@@ -10,6 +10,7 @@ downstream. Scanned-page OCR is Claude-only; with this provider OCR uses Tessera
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Any, TypeVar
@@ -24,6 +25,8 @@ T = TypeVar("T", bound=BaseModel)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.S)
 
 
+log = logging.getLogger(__name__)
+
 # Friendly names for TH_AI_PROVIDER; the address is filled in when TH_AI_BASE_URL is empty.
 KNOWN_SERVICES = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -37,10 +40,10 @@ KNOWN_SERVICES = {
 
 # used when the model box is empty or still holds a Claude model name (it belongs to another service)
 DEFAULT_MODELS = {
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3.8-flash",
     "openai": "gpt-4o-mini",
     "groq": "llama-3.3-70b-versatile",
-    "openrouter": "google/gemini-2.5-flash",
+    "openrouter": "google/gemini-3.8-flash",
     "deepseek": "deepseek-chat",
     "mistral": "mistral-small-latest",
 }
@@ -58,6 +61,25 @@ def model_name() -> str:
     if " " in m or (m != m.lower() and get_config().ai_provider.strip().lower() == "gemini"):
         m = "-".join(m.lower().split())
     return m
+
+
+def recommended_model(error_text: str, current: str) -> str | None:
+    """Services that retire a model say which one to use instead ("... update your code to use models/X ...")."""
+    import re
+
+    for m in re.finditer(r"\buse\s+(?:the\s+)?(?:models/)?([A-Za-z][\w.]*-[\w.\-]*\w)", error_text or ""):
+        name = m.group(1)
+        if name != current and any(ch.isdigit() for ch in name):
+            return name
+    return None
+
+
+def switch_model(new: str) -> None:
+    """Remember the service's recommended model in .env (as if the person had typed it in Settings)."""
+    from .. import envfile
+
+    envfile.write_values({"TH_AI_MODEL": new})
+    envfile.reload_now()
 
 
 def list_models() -> list[str]:
@@ -104,7 +126,8 @@ class OpenAICompatProvider(ClaudeProvider):
         last: Exception | None = None
         for attempt in range(4):
             try:
-                r = requests.post(url, headers=headers, data=json.dumps(body), timeout=600)
+                r = requests.post(url, headers=headers, timeout=600,
+                                  data=json.dumps({k: v for k, v in body.items() if not k.startswith("_")}))
             except requests.RequestException as e:
                 last = e
                 time.sleep(2 ** attempt)
@@ -115,6 +138,13 @@ class OpenAICompatProvider(ClaudeProvider):
                 last = RuntimeError(f"AI provider busy ({r.status_code})")
                 time.sleep(min(30, 3 * 2 ** attempt))
                 continue
+            if r.status_code == 404 and not body.get("_switched"):
+                new = recommended_model(r.text, str(body.get("model")))
+                if new:  # the model was retired: follow the service's own recommendation once
+                    log.warning("AI model %s retired by the service; switching to %s", body.get("model"), new)
+                    switch_model(new)
+                    body = {**body, "model": new, "_switched": True}
+                    continue
             if r.status_code >= 400:
                 raise _BadRequest(r.status_code, r.text[:1000])
             return r.json()

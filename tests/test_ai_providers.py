@@ -160,8 +160,18 @@ def test_claude_model_name_with_gemini_uses_gemini_default(env, monkeypatch):
     reset_config_cache()
     from tarbiyah.ai.openai_compat import OpenAICompatProvider, model_name
 
-    assert model_name() == "gemini-2.5-flash"
+    assert model_name() == "gemini-3.8-flash"
     assert OpenAICompatProvider().configured()
     monkeypatch.setenv("TH_AI_MODEL", "gemini-2.5-pro")
     reset_config_cache()
     assert model_name() == "gemini-2.5-pro"  # a real Gemini name is kept
+
+
+def test_retired_model_follows_the_services_recommendation():
+    from tarbiyah.ai.openai_compat import recommended_model
+
+    msg = ('{"error": {"code": 404, "message": "This model models/gemini-2.5-flash is no longer available to new users. '
+           'Please update your code to use models/gemini-3.8-flash for the latest features and improvements. '
+           'We recommend you to use the Interactions API (https://aistudio.google.com/docs/get-started).", "status": "NOT_FOUND"}}')
+    assert recommended_model(msg, "gemini-2.5-flash") == "gemini-3.8-flash"
+    assert recommended_model('{"error": "model not found"}', "x-1") is None
