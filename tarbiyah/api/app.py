@@ -1503,6 +1503,26 @@ def youtube_add(body: YtChannelIn, s: Session = Depends(get_session)) -> dict[st
     return _source(yc.add(s, body.channel_id, body.pillars, body.min_minutes), s)
 
 
+@app.get("/api/youtube/catalog")
+def youtube_catalog_list(s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_catalog as ytc
+
+    return {"channels": ytc.listing(s), "key_configured": bool(get_config().youtube_api_key)}
+
+
+class YtCatalogIn(BaseModel):
+    keys: list[str]
+
+
+@app.post("/api/youtube/catalog/add")
+def youtube_catalog_add(body: YtCatalogIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from .. import youtube_catalog as ytc
+
+    if not get_config().youtube_api_key:
+        raise HTTPException(400, "Add the YouTube API key first (Settings > Keys & AI).")
+    return ytc.add(s, body.keys[:40])
+
+
 @app.post("/api/youtube/dismiss")
 def youtube_dismiss(body: YtChannelIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     from .. import youtube_channels as yc

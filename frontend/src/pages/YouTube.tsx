@@ -29,6 +29,7 @@ export default function YouTube() {
         {(d) => (
           <>
             {!d.key_set ? <div className="alert alert-warn">{t("yt_need_key")} <Link to="/settings">{t("nav_settings")}</Link></div> : null}
+            <Recommended keySet={d.key_set} onChanged={state.reload} />
             <FindChannels d={d} reload={state.reload} />
             <Card title={`${t("yt_suggested")} (${d.suggestions.length})`}>
               {!d.suggestions.length ? <p className="small muted">{t("yt_no_suggestions")}</p> : null}
@@ -150,5 +151,89 @@ function ChannelRow({ c, defMin, onChanged }: { c: MyChannel; defMin: number; on
         </div>
       </div>
     </details>
+  );
+}
+
+interface RecChannel { key: string; name: string; lang: string; kind: string; pillars: string[]; about: string; added: boolean;
+  source_id: number | null; found_as: { title: string; url: string; subscribers: number; videos: number } | null }
+
+function Recommended({ keySet, onChanged }: { keySet: boolean; onChanged: () => void }) {
+  const { t } = useI18n();
+  const list = useAsync(() => api.get<{ channels: RecChannel[] }>("/api/youtube/catalog"), []);
+  const [lang, setLang] = useState<"ar" | "en">("ar");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [fails, setFails] = useState<string[]>([]);
+  const add = async (keys: string[]) => {
+    const r = await api.post<{ added: unknown[]; skipped: string[]; failed: string[] }>("/api/youtube/catalog/add", { keys });
+    setMsg(`${t("bulk_sites_added")}: ${r.added.length}${r.skipped.length ? ` · ${t("bulk_sites_skipped")}: ${r.skipped.length}` : ""}`);
+    setFails(r.failed);
+    list.reload();
+    onChanged();
+    return r;
+  };
+  const rows = (list.data?.channels || []).filter((c) => c.lang === lang);
+  const todo = rows.filter((c) => !c.added);
+  return (
+    <Card title={<>{t("yt_rec_title")} <span className="muted count">{list.data?.channels.length ?? ""}</span></>}>
+      <p className="small muted">{t("yt_rec_help")}</p>
+      <div className="results-bar">
+        <div className="tabs" role="tablist">
+          {(["ar", "en"] as const).map((l) => (
+            <button key={l} type="button" role="tab" aria-selected={lang === l} className={lang === l ? "tab active" : "tab"} onClick={() => setLang(l)}>
+              {l === "ar" ? t("lang_ar") : t("lang_en")}
+              <span className="tab-count">{(list.data?.channels || []).filter((c) => c.lang === l).length}</span>
+            </button>
+          ))}
+        </div>
+        <div className="results-meta">
+          {msg ? <span className="small" role="status">{msg}</span> : null}
+          <ActionButton className="btn btn-primary btn-small" disabled={!keySet || !todo.length} onRun={() => add(todo.map((c) => c.key))}>
+            {t("yt_rec_add_all")} ({todo.length})
+          </ActionButton>
+        </div>
+      </div>
+      {fails.length ? <div className="alert alert-warn small">{fails.map((f) => <div key={f} dir="auto">{f}</div>)}</div> : null}
+      <TableRows rows={rows} add={add} keySet={keySet} onChanged={() => { list.reload(); onChanged(); }} />
+    </Card>
+  );
+}
+
+function TableRows({ rows, add, keySet, onChanged }: { rows: RecChannel[]; add: (k: string[]) => Promise<unknown>; keySet: boolean; onChanged: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead><tr><th>{t("yt_channel")}</th><th>{t("pillar")}</th><th>{t("yt_found_as")}</th><th /></tr></thead>
+        <tbody>
+          {rows.map((c) => (
+            <tr key={c.key}>
+              <td className="wide-cell">
+                <strong dir="auto">{c.name}</strong> <span className="badge badge-neutral">{t(`yt_kind_${c.kind}` as never)}</span>
+                <div className="small muted" dir="auto">{c.about}</div>
+              </td>
+              <td className="small">{c.pillars.map((p) => t(`pillar_${p}` as never)).join("، ")}</td>
+              <td className="small">
+                {c.found_as ? (
+                  <>
+                    <a href={c.found_as.url} target="_blank" rel="noopener noreferrer" dir="auto">{c.found_as.title} ↗</a>
+                    <div className="muted">{fmtNum(c.found_as.subscribers)} {t("yt_subscribers")} · {fmtNum(c.found_as.videos)} {t("yt_videos")}</div>
+                  </>
+                ) : <span className="muted">—</span>}
+              </td>
+              <td className="nowrap">
+                {c.added && c.source_id ? (
+                  <span className="toolbar">
+                    <ActionButton className="btn btn-small" onRun={async () => { const r = await api.patch(`/api/sources/${c.source_id}`, { enabled: true }); onChanged(); return r; }}>{t("enable_source")}</ActionButton>
+                    <DeleteSourceButton id={c.source_id} name={c.name} onDone={onChanged} />
+                  </span>
+                ) : (
+                  <ActionButton className="btn btn-small btn-primary" disabled={!keySet} onRun={() => add([c.key])}>{t("add")}</ActionButton>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

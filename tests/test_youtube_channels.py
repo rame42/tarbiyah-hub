@@ -109,3 +109,39 @@ def test_quota_guard(env):
         raise AssertionError("should have stopped")
     except BudgetExceeded as e:
         assert "quota" in str(e)
+
+
+def test_recommended_channels_found_and_added_strict(env, monkeypatch):
+    from tarbiyah.api.app import app
+    from tarbiyah.config import get_config
+    from tarbiyah.sources import youtube
+
+    YQ = "UC" + "y" * 22
+
+    def api(self, path, **p):
+        if path == "channels" and p.get("forHandle") == "@YaqeenInstitute":
+            return {"items": [{"id": YQ, "snippet": {"title": "Yaqeen Institute"}, "statistics": {"subscriberCount": "1800000", "videoCount": "3000"}}]}
+        if path == "channels" and p.get("forHandle"):
+            return {"items": []}
+        if path == "search":
+            return {"items": [{"id": {"channelId": BAD}}, {"id": {"channelId": GOOD}}]}
+        if path == "channels":
+            info = {GOOD: "د. مصطفى أبو سعد", BAD: "Football Highlights"}
+            return {"items": [{"id": c, "snippet": {"title": info[c]}, "statistics": {"subscriberCount": "900000" if c == BAD else "50000"}}
+                              for c in p["id"].split(",")]}
+        raise AssertionError(path)
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "k")
+    get_config.cache_clear()
+    monkeypatch.setattr(youtube.YouTubeAdapter, "_api", api)
+    with TestClient(app) as c:
+        lst = c.get("/api/youtube/catalog").json()["channels"]
+        assert len(lst) == 30 and sum(x["lang"] == "ar" for x in lst) == 15
+        r = c.post("/api/youtube/catalog/add", json={"keys": ["yaqeen", "abusaad"]}).json()
+        assert {a["found"]["id"] for a in r["added"]} == {YQ, GOOD}  # by handle; by name (not the bigger football channel)
+        again = c.post("/api/youtube/catalog/add", json={"keys": ["yaqeen"]}).json()
+        assert again["skipped"] == ["Yaqeen Institute"]
+    with session_scope() as s:
+        src = s.query(Source).filter(Source.key == "youtube-abusaad").one()
+        assert not src.enabled and src.config["strict"]["review"] and "تربية" in src.config["strict"]["keywords"]
+        assert src.config["found_as"]["title"] == "د. مصطفى أبو سعد"
